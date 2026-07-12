@@ -2,17 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "CodexAPIManager",
+    name: "CodexAPIManagerPlus",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "CodexAPIManager", targets: ["CodexAPIManager"])
+        .executable(name: "CodexAPIManagerPlus", targets: ["CodexAPIManagerPlus"])
     ],
     targets: [
         .executableTarget(
-            name: "CodexAPIManager",
+            name: "CodexAPIManagerPlus",
+            path: "Sources/CodexAPIManager",
             exclude: ["App", "Views"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
+                .linkedFramework("Network"),
                 .linkedFramework("Security")
             ]
         )

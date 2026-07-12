@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 struct KeychainService {
-    static let service = "com.zps.codex-api-manager.api-keys"
+    static let service = "com.zps.codex-api-manager-plus.api-keys"
 
     func save(_ value: String, account: String) throws {
         let data = Data(value.utf8)

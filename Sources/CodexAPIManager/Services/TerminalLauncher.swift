@@ -9,9 +9,9 @@ struct CodexDesktopLauncher {
         profile: ProviderProfile,
         paths: RuntimePaths,
         workingDirectory: String,
-        apiKey: String?
+        apiKey _: String?
     ) throws -> Int32 {
-        let appURL = try officialCodexAppURL()
+        let appURL = try apiCodexAppURL()
         let executableName = try bundleExecutableName(at: appURL)
         let executableURL = appURL
             .appendingPathComponent("Contents/MacOS", isDirectory: true)
@@ -30,14 +30,12 @@ struct CodexDesktopLauncher {
 
         var environment = ProcessInfo.processInfo.environment
         environment["CODEX_HOME"] = paths.codexHome.path
+        environment["NO_PROXY"] = "127.0.0.1,localhost,::1"
+        environment["no_proxy"] = "127.0.0.1,localhost,::1"
         environment.removeValue(forKey: "CODEX_API_KEY")
         environment.removeValue(forKey: "OPENAI_API_KEY")
-        if profile.authenticationMode.needsKey {
-            guard let apiKey else {
-                throw ProfileValidationError.missingKey
-            }
-            environment["OPENAI_API_KEY"] = apiKey
-        }
+        // The child talks only to the loopback Plus router. Provider secrets
+        // stay in this manager process and are injected per selected model.
 
         if !FileManager.default.fileExists(atPath: paths.desktopLogFile.path) {
             FileManager.default.createFile(atPath: paths.desktopLogFile.path, contents: nil)
@@ -53,16 +51,40 @@ struct CodexDesktopLauncher {
         process.standardOutput = logHandle
         process.standardError = logHandle
         try process.run()
-        try "\(process.processIdentifier)\n".write(to: paths.desktopPIDFile, atomically: true, encoding: .utf8)
+        let pid = process.processIdentifier
+        try "\(pid)\n".write(to: paths.desktopPIDFile, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: paths.desktopPIDFile.path)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+            NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+        }
 
-        return process.processIdentifier
+        return pid
     }
 
     private func terminatePreviousInstance(paths: RuntimePaths) {
+        guard let pid = runningProcessID(paths: paths) else { return }
+        _ = kill(pid, SIGTERM)
+        usleep(400_000)
+    }
+
+    func isRunning(paths: RuntimePaths) -> Bool {
+        runningProcessID(paths: paths) != nil
+    }
+
+    @discardableResult
+    func activateRunning(paths: RuntimePaths) -> Bool {
+        guard let pid = runningProcessID(paths: paths),
+              let application = NSRunningApplication(processIdentifier: pid) else {
+            return false
+        }
+        return application.activate(options: [.activateAllWindows])
+    }
+
+    private func runningProcessID(paths: RuntimePaths) -> Int32? {
         guard let pidText = try? String(contentsOf: paths.desktopPIDFile),
               let pid = Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)),
-              pid > 0 else { return }
+              pid > 0,
+              kill(pid, 0) == 0 else { return nil }
 
         let output = Pipe()
         let ps = Process()
@@ -73,9 +95,8 @@ struct CodexDesktopLauncher {
         try? ps.run()
         let args = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         ps.waitUntilExit()
-        guard args.contains(paths.desktopDataDirectory.path) else { return }
-        _ = kill(pid, SIGTERM)
-        usleep(400_000)
+        guard args.contains(paths.desktopDataDirectory.path) else { return nil }
+        return pid
     }
 
     func openOfficialCodex() throws {
@@ -90,6 +111,14 @@ struct CodexDesktopLauncher {
                 NSLog("Unable to open official Codex: %@", error.localizedDescription)
             }
         }
+    }
+
+    private func apiCodexAppURL() throws -> URL {
+        let path = "/Applications/Codex API Plus.app"
+        guard FileManager.default.fileExists(atPath: path) else {
+            throw LaunchError.apiAppNotFound
+        }
+        return URL(fileURLWithPath: path, isDirectory: true)
     }
 
     private func officialCodexAppURL() throws -> URL {
@@ -117,11 +146,14 @@ struct CodexDesktopLauncher {
 }
 
 enum LaunchError: LocalizedError {
+    case apiAppNotFound
     case officialAppNotFound
     case officialExecutableNotFound
 
     var errorDescription: String? {
         switch self {
+        case .apiAppNotFound:
+            "未找到 Codex API Plus.app，请重新安装 Codex API 桌面版 Plus。"
         case .officialAppNotFound: "未找到官方 Codex 应用。"
         case .officialExecutableNotFound: "官方 Codex 应用不完整，找不到可执行文件。"
         }

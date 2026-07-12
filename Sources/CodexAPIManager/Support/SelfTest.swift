@@ -30,9 +30,236 @@ enum SelfTest {
         try expect(service.desktopPIDFile.lastPathComponent == "codex-desktop-api.pid", "desktop pid path")
         try expect(ProviderProfile.template(.cctq).baseURL == "https://www.cctq.ai/v1", "CCTQ base URL")
         try expect(ProviderProfile.template(.cctq).model == "gpt-5.5", "CCTQ model")
+        try expect(
+            !ProviderPreset.creationCases.contains(where: {
+                [.cctq, .cctqSol, .cctqTerra, .cctqLuna].contains($0)
+            }),
+            "CCTQ presets hidden from creation menu"
+        )
+        let duplicateSource = ProviderProfile.template(.openAI)
+        let duplicate = duplicateSource.duplicated(
+            existingNames: [duplicateSource.name, "\(duplicateSource.name) 副本"]
+        )
+        try expect(duplicate.id != duplicateSource.id, "duplicate gets a new ID")
+        try expect(duplicate.name == "OpenAI API 副本 2", "duplicate gets a unique name")
         try expect(ProviderProfile.template(.cctqSol).model == "gpt-5.6-sol", "GPT-5.6 Sol model")
         try expect(ProviderProfile.template(.cctqTerra).model == "gpt-5.6-terra", "GPT-5.6 Terra model")
         try expect(ProviderProfile.template(.cctqLuna).model == "gpt-5.6-luna", "GPT-5.6 Luna model")
+        try expect(
+            ProviderProfile.template(.openAI).workScenario == .development,
+            "default work scenario"
+        )
+        try expect(
+            ProviderProfile.template(.openAI).taskBudgetUSD
+                == WorkScenario.development.recommendedTaskBudgetUSD,
+            "default task budget"
+        )
+        try expect(WorkScenario.codeReview.sandboxMode == "read-only", "review sandbox")
+        try expect(WorkScenario.deepDebug.modelReasoningEffort == "xhigh", "debug reasoning")
+        try verifySecretFreeAuthFile()
+        try verifyTaskHistoryReconciliation()
+        try verifySessionUsageReading()
+        try expect(!ProxyHeaderPolicy.forwardsRequest("Accept-Encoding"), "request decompression policy")
+        try expect(!ProxyHeaderPolicy.forwardsResponse("Content-Encoding"), "response decompression policy")
+        try expect(ProxyHeaderPolicy.forwardsResponse("Content-Type"), "response content type")
+        try verifyChunkedRequestParsing()
+        try verifyMalformedRequestRejection()
+        try verifyCredentialTransportValidation()
+
+        let legacyProfile = """
+        {
+          "id": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+          "name": "Legacy",
+          "preset": "openAI",
+          "baseURL": "https://api.openai.com/v1",
+          "model": "gpt-5.4",
+          "wireAPI": "responses",
+          "authenticationMode": "bearer",
+          "authenticationHeader": "api-key"
+        }
+        """
+        let decodedLegacy = try JSONDecoder().decode(
+            ProviderProfile.self,
+            from: Data(legacyProfile.utf8)
+        )
+        try expect(decodedLegacy.workScenario == .development, "legacy scenario migration")
+        try expect(
+            decodedLegacy.taskBudgetUSD == WorkScenario.development.recommendedTaskBudgetUSD,
+            "legacy task budget migration"
+        )
+        try expect(decodedLegacy.workspacePath == nil, "legacy workspace migration")
+
+        let legacyTask = """
+        {
+          "schemaVersion": 2,
+          "taskID": "BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB",
+          "projectName": "Legacy",
+          "profileName": "Old API",
+          "providerName": "CCTQ",
+          "model": "legacy-model",
+          "scenario": "普通开发",
+          "startedAt": "2026-07-11T12:00:00Z"
+        }
+        """
+        let taskDecoder = JSONDecoder()
+        taskDecoder.dateDecodingStrategy = .iso8601
+        let decodedTask = try taskDecoder.decode(
+            TaskBridgeRecord.self,
+            from: Data(legacyTask.utf8)
+        )
+        try expect(decodedTask.processID == nil, "legacy task PID migration")
+        try expect(decodedTask.profileID == nil, "legacy task profile migration")
+        var customRelay = ProviderProfile.template(.generic)
+        customRelay.baseURL = "https://BotCF.com/v1"
+        try expect(
+            TaskBridge.billingProvider(for: customRelay) == "origin:https://botcf.com",
+            "custom billing provider origin"
+        )
+        let proxy = APIProxyServer()
+        try proxy.ensureReady(port: 0)
+        try expect(proxy.isReady, "loopback router startup")
+        proxy.stop()
+    }
+
+    private static func verifySecretFreeAuthFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        let paths = RuntimePaths(
+            supportDirectory: root,
+            profilesFile: root.appendingPathComponent("profiles.json"),
+            codexHome: codexHome,
+            activeProfileFile: root.appendingPathComponent("active-profile"),
+            activeAuthModeFile: root.appendingPathComponent("active-auth-mode"),
+            workingDirectoryFile: root.appendingPathComponent("working-directory"),
+            launcherFile: root.appendingPathComponent("launcher.command"),
+            desktopDataDirectory: root.appendingPathComponent("desktop-data"),
+            desktopLogFile: root.appendingPathComponent("desktop.log"),
+            modelCatalogFile: root.appendingPathComponent("model-catalog.json"),
+            authFile: codexHome.appendingPathComponent("auth.json"),
+            desktopPIDFile: root.appendingPathComponent("desktop.pid")
+        )
+        let service = CodexConfigService(paths: paths)
+        try service.prepareDirectories()
+        try service.writeEmptyAuthFile()
+
+        let data = try Data(contentsOf: paths.authFile)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: String]
+        try expect(object?.isEmpty == true, "secret-free auth file")
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: paths.authFile.path
+        )
+        try expect(
+            (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+            "auth file permissions"
+        )
+    }
+
+    private static func verifyTaskHistoryReconciliation() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let record = TaskBridgeRecord(
+            schemaVersion: 3,
+            taskID: UUID(),
+            projectName: "Fixture",
+            profileName: "Test",
+            providerName: "Test",
+            model: "test-model",
+            scenario: "普通开发",
+            startedAt: Date(timeIntervalSince1970: 100),
+            billingProvider: nil,
+            taskBudgetUSD: nil,
+            endedAt: nil,
+            status: "running",
+            processID: Int32.max,
+            workingDirectory: "/tmp",
+            profileID: UUID()
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(record).write(
+            to: directory.appendingPathComponent(TaskBridge.activeTaskFilename)
+        )
+
+        let now = Date(timeIntervalSince1970: 200)
+        let history = TaskBridge.reconcileHistory(in: directory, now: now)
+        try expect(history.first?.status == "finished", "finished task status")
+        try expect(history.first?.endedAt == now, "finished task time")
+        try expect(
+            !FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(
+                    TaskBridge.activeTaskFilename
+                ).path
+            ),
+            "active task cleanup"
+        )
+    }
+
+    private static func verifySessionUsageReading() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fixture = """
+        {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":12345},"last_token_usage":{"total_tokens":678},"model_context_window":200000}}}
+        """
+        try Data(fixture.utf8).write(to: directory.appendingPathComponent("rollout.jsonl"))
+        let snapshot = SessionUsageService.latest(in: directory)
+        try expect(snapshot?.totalTokens == 12_345, "current session usage")
+        try expect(snapshot?.lastRequestTokens == 678, "last request usage")
+        try expect(snapshot?.contextWindow == 200_000, "context window usage")
+    }
+
+    private static func verifyChunkedRequestParsing() throws {
+        let request = """
+        POST /v1/responses HTTP/1.1\r
+        Host: 127.0.0.1\r
+        Transfer-Encoding: chunked\r
+        Content-Type: application/json\r
+        \r
+        8\r
+        {"model"\r
+        B\r
+        :"fixture"}\r
+        0\r
+        \r
+
+        """
+        let parsed = HTTPProxyRequest.parse(Data(request.utf8))
+        try expect(parsed?.method == "POST", "chunked request method")
+        let object = parsed.flatMap { try? JSONSerialization.jsonObject(with: $0.body) as? [String: String] }
+        try expect(object?["model"] == "fixture", "chunked request body")
+    }
+
+    private static func verifyMalformedRequestRejection() throws {
+        let negativeLength = "POST /v1/responses HTTP/1.1\r\nContent-Length: -1\r\n\r\n"
+        try expect(HTTPProxyRequest.parse(Data(negativeLength.utf8)) == nil, "negative content length")
+        let hugeChunk = "POST /v1/responses HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFF\r\n"
+        try expect(HTTPProxyRequest.parse(Data(hugeChunk.utf8)) == nil, "overflowing chunk size")
+    }
+
+    private static func verifyCredentialTransportValidation() throws {
+        var insecure = ProviderProfile.template(.generic)
+        insecure.baseURL = "http://example.com/v1"
+        insecure.authenticationMode = .bearer
+        do {
+            try insecure.validate(requireStoredKey: false, hasStoredKey: true)
+            throw SelfTestError.failed("insecure credential transport")
+        } catch ProfileValidationError.insecureCredentialTransport {}
+
+        var protectedHeader = ProviderProfile.template(.generic)
+        protectedHeader.authenticationMode = .customHeader
+        protectedHeader.authenticationHeader = "Content-Length"
+        do {
+            try protectedHeader.validate(requireStoredKey: false, hasStoredKey: true)
+            throw SelfTestError.failed("protected authentication header")
+        } catch ProfileValidationError.invalidAuthenticationHeader {}
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ name: String) throws {

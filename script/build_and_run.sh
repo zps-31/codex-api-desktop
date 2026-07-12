@@ -2,11 +2,11 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="CodexAPIManager"
-DISPLAY_NAME="Codex API 桌面版"
-BUNDLE_ID="com.zps.codex-api-desktop"
-APP_VERSION="1.6.3"
-BUILD_NUMBER="11"
+APP_NAME="CodexAPIManagerPlus"
+DISPLAY_NAME="Codex API 桌面版 Plus"
+BUNDLE_ID="com.zps.codex-api-desktop.plus"
+APP_VERSION="2.13.0"
+BUILD_NUMBER="26"
 MIN_SYSTEM_VERSION="14.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,7 +17,7 @@ APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
-ARCHIVE_PATH="$DIST_DIR/Codex-API-Desktop-$APP_VERSION.zip"
+ARCHIVE_PATH="$DIST_DIR/Codex-API-Desktop-Plus-$APP_VERSION.zip"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -25,6 +25,7 @@ cd "$ROOT_DIR"
 if [[ "$MODE" == "package" ]]; then
   swift build -c release
   BUILD_BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
+  "$BUILD_BINARY" --self-test
 else
   swift build
   BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
@@ -92,7 +93,7 @@ case "$MODE" in
     ;;
   package)
     rm -f "$ARCHIVE_PATH"
-    /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "$ARCHIVE_PATH"
+    /usr/bin/ditto -c -k --norsrc --keepParent "$APP_BUNDLE" "$ARCHIVE_PATH"
     /usr/bin/shasum -a 256 "$ARCHIVE_PATH"
     echo "Created: $ARCHIVE_PATH"
     ;;

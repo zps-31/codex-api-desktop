@@ -1,56 +1,63 @@
-# Codex API 桌面版
+# Codex API Desktop Plus
 
-一个用于管理 OpenAI-compatible API 配置并启动独立 Codex 桌面进程的
-macOS 应用。它与官方 Codex 的配置和应用数据相互隔离。
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://www.apple.com/macos/)
+[![Swift 6.2](https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
+[![Release 2.13.0](https://img.shields.io/badge/release-2.13.0-0A84FF)](CHANGELOG.md)
+
+一个原生 macOS 配置管理器，用于管理 OpenAI-compatible Responses API
+配置，并启动与官方 Codex 数据隔离的 API 版 Codex 桌面进程。
 
 > [!IMPORTANT]
 > 本项目是非官方社区工具，与 OpenAI 无隶属或背书关系。Codex 和 OpenAI
 > 是其各自权利人的商标。
 
-## 功能
+<p align="center">
+  <img src="docs/images/codex-api-desktop-plus.png" alt="Codex API Desktop Plus 2.13.0" width="900">
+</p>
 
-- 在应用内切换 API Base URL、模型、认证方式与 API Key。
-- API Key 保存到 macOS 钥匙串，不写入项目源码或普通配置文件。
-- 使用独立的 `CODEX_HOME` 和桌面 Chromium 数据目录。
-- 支持 OpenAI、自定义 OpenAI-compatible Responses API、Mistral、Ollama
-  与 LM Studio 模板。
-- 可以与官方 Codex 同时运行，不修改 `~/.codex`。
+## 当前版本
 
-第三方 API 必须兼容 OpenAI Responses 协议、流式输出和工具调用。仅提供
-Chat Completions 的 API 需要先接入兼容代理。
+**2.13.0**, 2026-07-12
 
-## 系统要求
+- [下载 Codex API Desktop Plus 2.13.0](https://github.com/zps-31/codex-api-desktop/raw/refs/heads/main/downloads/Codex-API-Desktop-Plus-2.13.0.zip)
+- SHA-256: `3ed57233491a1f4983e5c46012d4351d00b069925f898ccf90cceb29646a7bb3`
+- 完整变更: [CHANGELOG.md](CHANGELOG.md)
 
-- macOS 14 或更高版本
-- 已安装官方 Codex macOS 应用，或可用的 Codex CLI
-- 从源码构建时需要 Xcode Command Line Tools 或 Xcode
+## 主要功能
 
-## 下载与安装
+- 管理 API Base URL、模型 ID、认证方式、项目目录和启动场景。
+- 在左侧列表新增、复制、删除和切换模型配置。
+- API Key 只保存到 macOS 钥匙串。
+- 启动前检查凭据、工作目录、模型目录和目标模型。
+- 使用独立 `CODEX_HOME` 与桌面数据目录，不修改官方 `~/.codex`。
+- 本机 Responses API 路由自动选择真实上游、模型和钥匙串凭据。
+- 状态栏实时显示当前会话、最近请求和模型上下文窗口。
+- 保存最近 100 次启动记录，并与 Codex Meter Plus 同步任务预算。
 
-1. [直接下载 Codex API 桌面版 1.6.3](https://github.com/zps-31/codex-api-desktop/raw/refs/heads/main/downloads/Codex-API-Desktop-1.6.3.zip)，或打开 [Releases](https://github.com/zps-31/codex-api-desktop/releases/latest) 查看版本说明。
-2. 核对 SHA-256：`e50a249fb9cef2a12b7c3520557231dc0e808a969f71e9ee45eef45c98c9e090`。
-3. 解压后将应用拖入“应用程序”文件夹。
-4. 首次打开时，如果 macOS 阻止运行，请在“系统设置 > 隐私与安全性”中
-   选择“仍要打开”。
+第三方 API 必须兼容 OpenAI Responses API、流式输出和工具调用。只支持
+Chat Completions 的服务需要先接入兼容代理。
 
-应用采用临时签名，未经过 Apple 公证。请只从本仓库下载。
+## 安装
 
-## 使用方法
+1. 下载并核对 SHA-256。
+2. 解压后将 `Codex API 桌面版 Plus.app` 移到 `/Applications`。
+3. 首次打开时，如 macOS 阻止运行，在“系统设置 > 隐私与安全性”中选择
+   “仍要打开”。
+4. 新建或选择配置，保存 API Key，运行启动前检查后启动 API Codex。
 
-1. 打开“Codex API 桌面版”。
-2. 在左侧选择服务商模板，或新增自定义配置。
-3. 填写 API Base URL、模型和认证方式。
-4. 输入 API Key 并保存。Key 会存入 macOS 钥匙串。
-5. 选择工作目录，然后点击“启动 Codex 桌面 API 版”。
+应用采用临时签名，未经过 Apple Developer ID 公证。`codesign` 完整性验证
+通过，但 Gatekeeper 仍可能要求手动确认首次启动。
 
-应用数据保存在：
+## 本机数据
+
+应用数据默认保存在：
 
 ```text
-~/Library/Application Support/Codex API Manager/
+~/Library/Application Support/Codex API Manager Plus/
 ```
 
-其中 API 版 Codex 使用 `codex-home`，桌面数据使用 `desktop-data`。卸载应用
-不会自动删除这些数据。
+API Key 位于 macOS 钥匙串，不写入仓库、普通配置文件或 Codex 子进程环境。
+卸载应用不会自动删除配置与会话数据。
 
 ## 从源码构建
 
@@ -58,25 +65,22 @@ Chat Completions 的 API 需要先接入兼容代理。
 git clone https://github.com/zps-31/codex-api-desktop.git
 cd codex-api-desktop
 swift build
-swift run CodexAPIManager --self-test
+swift run CodexAPIManagerPlus --self-test
 ./script/build_and_run.sh
 ```
 
-生成可发布的应用和 zip：
+构建发布包：
 
 ```zsh
 ./script/build_and_run.sh package
 ```
 
-产物位于 `dist/`。
+产物位于 `dist/`。需要 macOS 14 或更高版本，以及 Xcode Command Line
+Tools 或 Xcode。
 
-## 隐私
+## 安全与隐私
 
-应用不会把凭据上传到本项目维护者的服务器。启动 Codex 后，请求会发送给
-你所选择的 API 服务商；其数据处理方式受对应服务商的隐私政策约束。
+本机代理只监听 `127.0.0.1`，带凭据的远程服务必须使用 HTTPS，跨域重定向
+不会携带认证信息。详细边界与报告方式见 [SECURITY.md](SECURITY.md)。
 
-## 已知说明
-
-- CCTQ 模板使用 `https://www.cctq.ai/v1` 和 Responses API。
-- 模板包含 `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna` 等模型配置。
-- 某个第三方模型返回 503 通常表示该模型后端暂不可用，不代表本地配置损坏。
+Codex 请求会发送给你选择的 API 服务商，请同时阅读相应服务商的隐私政策。

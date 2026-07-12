@@ -15,7 +15,22 @@ struct RuntimePaths {
     let desktopPIDFile: URL
 }
 
+struct CodexConfigurationSignature: Equatable {
+    let modifiedAt: Date
+    let size: Int
+}
+
 struct CodexConfigService {
+    static let routerPort: UInt16 = 62139
+    static let routerProviderID = "api_plus_router"
+
+    static func modelAlias(for profile: ProviderProfile, in profiles: [ProviderProfile]) -> String {
+        let duplicateCount = profiles.filter { $0.model == profile.model }.count
+        guard duplicateCount > 1 else { return profile.model }
+        let suffix = profile.id.uuidString.lowercased().prefix(8)
+        return "\(profile.model)-api-plus-\(suffix)"
+    }
+
     let paths: RuntimePaths
 
     static func defaultPaths(fileManager: FileManager = .default) throws -> RuntimePaths {
@@ -25,7 +40,7 @@ struct CodexConfigService {
             appropriateFor: nil,
             create: true
         )
-        let support = supportRoot.appendingPathComponent("Codex API Manager", isDirectory: true)
+        let support = supportRoot.appendingPathComponent("Codex API Manager Plus", isDirectory: true)
         let codexHome = support.appendingPathComponent("codex-home", isDirectory: true)
         return RuntimePaths(
             supportDirectory: support,
@@ -56,41 +71,67 @@ struct CodexConfigService {
         )
     }
 
-    func writeConfiguration(for profile: ProviderProfile, workingDirectory: String, apiKey: String?) throws {
+    func configuredModel() -> String? {
+        Self.configuredModel(at: paths.codexHome.appendingPathComponent("config.toml"))
+    }
+
+    static func configurationSignature(at file: URL) -> CodexConfigurationSignature? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path) else {
+            return nil
+        }
+        return CodexConfigurationSignature(
+            modifiedAt: attributes[.modificationDate] as? Date ?? .distantPast,
+            size: attributes[.size] as? Int ?? 0
+        )
+    }
+
+    private static func configuredModel(at file: URL) -> String? {
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("model = \"") else { continue }
+            let value = trimmed.dropFirst("model = \"".count)
+            guard let quote = value.firstIndex(of: "\"") else { return nil }
+            return String(value[..<quote])
+        }
+        return nil
+    }
+
+    func writeConfiguration(
+        for profile: ProviderProfile,
+        profiles: [ProviderProfile],
+        workingDirectory: String
+    ) throws {
         try prepareDirectories()
-        try writeModelCatalog(for: profile)
-        try writeAuthFile(apiKey: apiKey, required: profile.authenticationMode.needsKey)
-        let providerID = profile.providerID
-        var lines = [
+        let orderedProfiles = [profile] + profiles.filter { $0.id != profile.id }
+        try writeModelCatalog(for: orderedProfiles)
+        try writeEmptyAuthFile()
+        let modelReasoningEffort: String
+        if profile.model == "gpt-5.6-sol", profile.workScenario == .deepDebug {
+            modelReasoningEffort = "max"
+        } else {
+            modelReasoningEffort = profile.workScenario.modelReasoningEffort
+        }
+        let lines = [
             "#:schema https://developers.openai.com/codex/config-schema.json",
-            "model = \"\(TOMLEscaping.string(profile.model))\"",
-            "model_provider = \"\(providerID)\"",
+            "model = \"\(Self.modelAlias(for: profile, in: profiles))\"",
+            "model_provider = \"\(Self.routerProviderID)\"",
             "model_catalog_json = \"\(TOMLEscaping.string(paths.modelCatalogFile.path))\"",
-            "plan_mode_reasoning_effort = \"xhigh\"",
-            "model_reasoning_effort = \(profile.model == "gpt-5.6-sol" ? "\"max\"" : "\"high\"")",
+            "plan_mode_reasoning_effort = \"\(profile.workScenario.planReasoningEffort)\"",
+            "model_reasoning_effort = \"\(modelReasoningEffort)\"",
             "disable_response_storage = true",
             "supports_websockets = false",
             "approval_policy = \"on-request\"",
-            "sandbox_mode = \"workspace-write\"",
+            "sandbox_mode = \"\(profile.workScenario.sandboxMode)\"",
             "check_for_update_on_startup = false",
             "web_search = \"disabled\"",
             "",
-            "[model_providers.\(providerID)]",
-            "name = \"\(TOMLEscaping.string(profile.name))\"",
-            "base_url = \"\(TOMLEscaping.string(profile.baseURL))\"",
+            "[model_providers.\(Self.routerProviderID)]",
+            "name = \"Codex API Plus 本机路由\"",
+            "base_url = \"http://127.0.0.1:\(Self.routerPort)/v1\"",
             "wire_api = \"responses\"",
-            "requires_openai_auth = \(profile.authenticationMode.needsKey ? "true" : "false")"
+            "requires_openai_auth = false"
         ]
-
-        switch profile.authenticationMode {
-        case .bearer:
-            lines.append("env_key = \"OPENAI_API_KEY\"")
-        case .customHeader:
-            let header = TOMLEscaping.string(profile.authenticationHeader)
-            lines.append("env_http_headers = { \"\(header)\" = \"OPENAI_API_KEY\" }")
-        case .none:
-            break
-        }
 
         let config = lines.joined(separator: "\n") + "\n"
         try config.write(
@@ -117,17 +158,20 @@ struct CodexConfigService {
         // .command file is left untouched so existing users do not lose it.
     }
 
-    private func writeAuthFile(apiKey: String?, required: Bool) throws {
-        let object: [String: String] = required && apiKey?.isEmpty == false
-            ? ["OPENAI_API_KEY": apiKey!]
-            : [:]
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+    func writeEmptyAuthFile() throws {
+        // Provider credentials remain in the manager and are injected by the
+        // loopback router. Keep this compatibility file free of secrets.
+        let data = try JSONSerialization.data(
+            withJSONObject: [String: String](),
+            options: [.prettyPrinted, .sortedKeys]
+        )
         try data.write(to: paths.authFile, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: paths.authFile.path)
     }
 
-    private func writeModelCatalog(for profile: ProviderProfile) throws {
+    private func writeModelCatalog(for profiles: [ProviderProfile]) throws {
         let candidates = [
+            "/Applications/Codex API Plus.app/Contents/Resources/codex",
             "/Applications/Codex Office.app/Contents/Resources/codex",
             "/Applications/Codex.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex",
@@ -155,27 +199,17 @@ struct CodexConfigService {
             throw ConfigServiceError.modelCatalogUnavailable
         }
 
-        let slugs: [String]
-        if profile.baseURL.localizedCaseInsensitiveContains("cctq.ai") {
-            // Keep all three CCTQ GPT-5.6 entries available to the desktop
-            // model picker. The runtime uses this catalog before making the
-            // request, so writing only the active entry breaks model switching.
-            slugs = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
-        } else {
-            slugs = [profile.model]
-        }
-
-        let catalogModels = slugs.map { slug -> [String: Any] in
+        let catalogModels = profiles.map { profile -> [String: Any] in
             var model = baseline
-            model["slug"] = slug
-            model["display_name"] = slug
-            model["description"] = "Custom Responses API model via \(profile.name)"
+            model["slug"] = Self.modelAlias(for: profile, in: profiles)
+            model["display_name"] = profile.name
+            model["description"] = "\(profile.model) · \(profile.baseURL)"
             model["visibility"] = "list"
             model["supported_in_api"] = true
             model["priority"] = 0
             model["availability_nux"] = NSNull()
             model["upgrade"] = NSNull()
-            if slug == "gpt-5.6-sol",
+            if profile.model == "gpt-5.6-sol",
                var levels = model["supported_reasoning_levels"] as? [[String: Any]],
                !levels.contains(where: { $0["effort"] as? String == "max" }) {
                 levels.append(["effort": "max", "description": "Maximum reasoning depth for GPT-5.6 Sol"])
@@ -196,7 +230,6 @@ struct CodexConfigService {
     private func writeLauncher() throws {
         let support = TOMLEscaping.shellSingleQuoted(paths.supportDirectory.path)
         let codexHome = TOMLEscaping.shellSingleQuoted(paths.codexHome.path)
-        let keychainService = TOMLEscaping.shellSingleQuoted(KeychainService.service)
 
         let script = """
         #!/bin/zsh
@@ -204,23 +237,13 @@ struct CodexConfigService {
 
         SUPPORT_DIR=\(support)
         export CODEX_HOME=\(codexHome)
+        export NO_PROXY='127.0.0.1,localhost,::1'
+        export no_proxy="$NO_PROXY"
         PROFILE_ID="$(/bin/cat "$SUPPORT_DIR/active-profile" | /usr/bin/tr -d '\\r\\n')"
-        AUTH_MODE="$(/bin/cat "$SUPPORT_DIR/active-auth-mode" | /usr/bin/tr -d '\\r\\n')"
         WORKING_DIR="$(/bin/cat "$SUPPORT_DIR/working-directory" | /usr/bin/tr -d '\\r\\n')"
 
-        if [[ "$AUTH_MODE" != "none" ]]; then
-          if ! API_KEY="$(/usr/bin/security find-generic-password -s \(keychainService) -a "$PROFILE_ID" -w 2>/dev/null)"; then
-            print -r -- "未找到此配置的 API Key。请回到 Codex API 管理器保存密钥。"
-            print -n -- "按回车关闭窗口…"
-            read -r
-            exit 1
-          fi
-          export OPENAI_API_KEY="$API_KEY"
-          unset API_KEY
-        fi
-
         CODEX_BIN=""
-        for candidate in /opt/homebrew/bin/codex /usr/local/bin/codex "/Applications/Codex Office.app/Contents/Resources/codex"; do
+        for candidate in /opt/homebrew/bin/codex /usr/local/bin/codex "/Applications/Codex API Plus.app/Contents/Resources/codex" "/Applications/Codex Office.app/Contents/Resources/codex"; do
           if [[ -x "$candidate" ]]; then
             CODEX_BIN="$candidate"
             break
