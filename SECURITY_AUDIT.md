@@ -27,11 +27,14 @@
 - 实际 Codex CLI 经 `127.0.0.1:62139/v1/responses` 完成流式请求并返回 `SECURITY_OK`。
 - 2026-07-13 的官方 Codex 事件仅返回 10080 分钟周窗口，旧 300 分钟
   窗口已不再返回；Meter 的运行态选择与新额度规则一致。
-- 候选版本：Codex API 桌面版 Plus 2.14.0；Codex Meter Plus 2.5.1。
+- 候选版本：Codex API 桌面版 Plus 2.14.1；Codex Meter Plus 2.5.1。
 
 ## 性能与兼容性复查
 
 - 两款候选应用均为 `arm64 + x86_64` 通用二进制。
+- API Codex 使用独立 `HOME`、Core Foundation home、XDG、`CODEX_HOME`
+  和 Electron 数据目录；与官方 ChatGPT Codex 并行运行时不会改写
+  `~/.codex/config.toml`。
 - Meter 对两套约 230 MiB 会话历史的冷启动解析约消耗 1.65 秒 CPU。
 - Meter 2.5.1 使用惰性聚合避免每次刷新复制完整历史记录；133 秒、跨两次
   刷新的窗口内累计 CPU 增加约 0.83 秒，真实物理占用为 50–53 MiB 并

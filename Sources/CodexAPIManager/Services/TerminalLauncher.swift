@@ -26,14 +26,10 @@ struct CodexDesktopLauncher {
             attributes: [.posixPermissions: 0o700]
         )
 
-        var environment = ProcessInfo.processInfo.environment
-        environment["CODEX_HOME"] = paths.codexHome.path
-        environment["NO_PROXY"] = "127.0.0.1,localhost,::1"
-        environment["no_proxy"] = "127.0.0.1,localhost,::1"
-        environment.removeValue(forKey: "CODEX_API_KEY")
-        environment.removeValue(forKey: "OPENAI_API_KEY")
-        // The child talks only to the loopback Plus router. Provider secrets
-        // stay in this manager process and are injected per selected model.
+        let environment = Self.isolatedEnvironment(
+            inherited: ProcessInfo.processInfo.environment,
+            paths: paths
+        )
 
         if !FileManager.default.fileExists(atPath: paths.desktopLogFile.path) {
             FileManager.default.createFile(atPath: paths.desktopLogFile.path, contents: nil)
@@ -57,6 +53,40 @@ struct CodexDesktopLauncher {
         }
 
         return pid
+    }
+
+    static func isolatedEnvironment(
+        inherited: [String: String],
+        paths: RuntimePaths
+    ) -> [String: String] {
+        var environment = inherited
+        let privateHome = paths.desktopHomeDirectory.path
+        environment["HOME"] = privateHome
+        environment["CFFIXED_USER_HOME"] = privateHome
+        environment["XDG_CONFIG_HOME"] = paths.desktopHomeDirectory
+            .appendingPathComponent(".config", isDirectory: true).path
+        environment["XDG_CACHE_HOME"] = paths.desktopHomeDirectory
+            .appendingPathComponent(".cache", isDirectory: true).path
+        environment["XDG_DATA_HOME"] = paths.desktopHomeDirectory
+            .appendingPathComponent(".local/share", isDirectory: true).path
+        environment["CODEX_HOME"] = paths.codexHome.path
+        environment["NO_PROXY"] = "127.0.0.1,localhost,::1"
+        environment["no_proxy"] = "127.0.0.1,localhost,::1"
+        for key in [
+            "CODEX_API_KEY",
+            "CODEX_CONFIG",
+            "OPENAI_API_KEY",
+            "OPENAI_API_BASE",
+            "OPENAI_BASE_URL",
+            "OPENAI_ORGANIZATION",
+            "OPENAI_ORG_ID",
+            "OPENAI_PROJECT_ID"
+        ] {
+            environment.removeValue(forKey: key)
+        }
+        // The child talks only to the loopback Plus router. Provider secrets
+        // and every writable home/config surface remain outside official Codex.
+        return environment
     }
 
     private func terminatePreviousInstance(paths: RuntimePaths) {

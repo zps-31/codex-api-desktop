@@ -8,6 +8,7 @@ struct RuntimePaths {
     let activeAuthModeFile: URL
     let workingDirectoryFile: URL
     let launcherFile: URL
+    let desktopHomeDirectory: URL
     let desktopDataDirectory: URL
     let desktopLogFile: URL
     let modelCatalogFile: URL
@@ -42,6 +43,7 @@ struct CodexConfigService {
         )
         let support = supportRoot.appendingPathComponent("Codex API Manager Plus", isDirectory: true)
         let codexHome = support.appendingPathComponent("codex-home", isDirectory: true)
+        let desktopHome = support.appendingPathComponent("api-home", isDirectory: true)
         return RuntimePaths(
             supportDirectory: support,
             profilesFile: support.appendingPathComponent("profiles.json"),
@@ -50,6 +52,7 @@ struct CodexConfigService {
             activeAuthModeFile: support.appendingPathComponent("active-auth-mode"),
             workingDirectoryFile: support.appendingPathComponent("working-directory"),
             launcherFile: support.appendingPathComponent("启动 Codex API.command"),
+            desktopHomeDirectory: desktopHome,
             desktopDataDirectory: support.appendingPathComponent("desktop-data", isDirectory: true),
             desktopLogFile: support.appendingPathComponent("codex-desktop-api.log"),
             modelCatalogFile: support.appendingPathComponent("model-catalog.json"),
@@ -69,6 +72,18 @@ struct CodexConfigService {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: 0o700]
         )
+        for directory in [
+            paths.desktopHomeDirectory,
+            paths.desktopHomeDirectory.appendingPathComponent(".config", isDirectory: true),
+            paths.desktopHomeDirectory.appendingPathComponent(".cache", isDirectory: true),
+            paths.desktopHomeDirectory.appendingPathComponent(".local/share", isDirectory: true)
+        ] {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+        }
     }
 
     func configuredModel() -> String? {

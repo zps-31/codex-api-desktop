@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.14.1 - 2026-07-13
+
+- Fully isolated API Codex from the official ChatGPT account by assigning
+  private `HOME`, Core Foundation home, XDG directories, `CODEX_HOME`, and
+  Electron user data to every launched API desktop process.
+- Removed inherited OpenAI/Codex credentials and endpoint overrides before
+  launch, preventing API model choices from leaking into official Codex.
+- Preserved portable fallback to the official Codex app while allowing both
+  instances to run concurrently with independent configuration and state.
+
 ## 2.14.0 - 2026-07-12
 
 - Fixed local Ollama and LM Studio profiles being hidden or blocked when no API Key is needed.

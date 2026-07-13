@@ -31,6 +31,7 @@ enum SelfTest {
         }
 
         let service = try CodexConfigService.defaultPaths()
+        try expect(service.desktopHomeDirectory.lastPathComponent == "api-home", "desktop home path")
         try expect(service.desktopDataDirectory.lastPathComponent == "desktop-data", "desktop data path")
         try expect(service.desktopLogFile.lastPathComponent == "codex-desktop-api.log", "desktop log path")
         try expect(service.modelCatalogFile.lastPathComponent == "model-catalog.json", "model catalog path")
@@ -65,6 +66,7 @@ enum SelfTest {
         try expect(WorkScenario.codeReview.sandboxMode == "read-only", "review sandbox")
         try expect(WorkScenario.deepDebug.modelReasoningEffort == "xhigh", "debug reasoning")
         try verifySecretFreeAuthFile()
+        try verifyIsolatedDesktopEnvironment()
         try verifyTaskHistoryReconciliation()
         try verifySessionUsageReading()
         try verifyApplicationLocation()
@@ -149,6 +151,7 @@ enum SelfTest {
             activeAuthModeFile: root.appendingPathComponent("active-auth-mode"),
             workingDirectoryFile: root.appendingPathComponent("working-directory"),
             launcherFile: root.appendingPathComponent("launcher.command"),
+            desktopHomeDirectory: root.appendingPathComponent("api-home"),
             desktopDataDirectory: root.appendingPathComponent("desktop-data"),
             desktopLogFile: root.appendingPathComponent("desktop.log"),
             modelCatalogFile: root.appendingPathComponent("model-catalog.json"),
@@ -169,6 +172,56 @@ enum SelfTest {
             (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
             "auth file permissions"
         )
+    }
+
+    private static func verifyIsolatedDesktopEnvironment() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let paths = RuntimePaths(
+            supportDirectory: root,
+            profilesFile: root.appendingPathComponent("profiles.json"),
+            codexHome: root.appendingPathComponent("codex-home"),
+            activeProfileFile: root.appendingPathComponent("active-profile"),
+            activeAuthModeFile: root.appendingPathComponent("active-auth-mode"),
+            workingDirectoryFile: root.appendingPathComponent("working-directory"),
+            launcherFile: root.appendingPathComponent("launcher.command"),
+            desktopHomeDirectory: root.appendingPathComponent("api-home"),
+            desktopDataDirectory: root.appendingPathComponent("desktop-data"),
+            desktopLogFile: root.appendingPathComponent("desktop.log"),
+            modelCatalogFile: root.appendingPathComponent("model-catalog.json"),
+            authFile: root.appendingPathComponent("codex-home/auth.json"),
+            desktopPIDFile: root.appendingPathComponent("desktop.pid")
+        )
+        let environment = CodexDesktopLauncher.isolatedEnvironment(
+            inherited: [
+                "HOME": "/Users/official",
+                "PATH": "/usr/bin:/bin",
+                "CODEX_API_KEY": "must-not-leak",
+                "OPENAI_API_KEY": "must-not-leak",
+                "OPENAI_BASE_URL": "https://must-not-leak.example"
+            ],
+            paths: paths
+        )
+        try expect(
+            environment["HOME"] == paths.desktopHomeDirectory.path,
+            "isolated HOME"
+        )
+        try expect(
+            environment["CFFIXED_USER_HOME"] == paths.desktopHomeDirectory.path,
+            "isolated Core Foundation home"
+        )
+        try expect(
+            environment["CODEX_HOME"] == paths.codexHome.path,
+            "isolated CODEX_HOME"
+        )
+        try expect(
+            environment["XDG_CONFIG_HOME"]?.hasPrefix(paths.desktopHomeDirectory.path) == true,
+            "isolated XDG config"
+        )
+        try expect(environment["PATH"] == "/usr/bin:/bin", "preserved PATH")
+        try expect(environment["CODEX_API_KEY"] == nil, "removed Codex API key")
+        try expect(environment["OPENAI_API_KEY"] == nil, "removed OpenAI API key")
+        try expect(environment["OPENAI_BASE_URL"] == nil, "removed OpenAI base URL")
     }
 
     private static func verifyTaskHistoryReconciliation() throws {

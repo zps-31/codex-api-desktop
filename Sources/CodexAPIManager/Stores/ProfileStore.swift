@@ -44,6 +44,7 @@ final class ProfileStore {
                 activeAuthModeFile: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Codex API Manager Plus/active-auth-mode"),
                 workingDirectoryFile: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Codex API Manager Plus/working-directory"),
                 launcherFile: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Codex API Manager Plus/启动 Codex API.command"),
+                desktopHomeDirectory: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Codex API Manager Plus/api-home"),
                 desktopDataDirectory: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Codex API Manager Plus/desktop-data"),
                 desktopLogFile: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Codex API Manager Plus/codex-desktop-api.log"),
                 modelCatalogFile: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("Codex API Manager Plus/model-catalog.json"),
