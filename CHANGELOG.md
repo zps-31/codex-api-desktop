@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.14.0 - 2026-07-12
+
+- Fixed local Ollama and LM Studio profiles being hidden or blocked when no API Key is needed.
+- Replaced repeated Keychain value reads with lightweight existence checks.
+- Fixed unsafe symbol-image assumptions and hardened response-size validation.
+- Tightened billing-domain matching to exact domains and subdomains.
+- Stopped stale task timers and local proxy instances during store teardown.
+- Added universal Apple Silicon and Intel packaging, custom app icons, checksums,
+  and a fail-closed Developer ID notarization workflow.
+
 ## 2.13.0 - 2026-07-12
 
 - Added current-session, latest-request, and context-window usage metrics.

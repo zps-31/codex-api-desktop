@@ -1,10 +1,17 @@
 import AppKit
 
 enum ExternalAppLauncher {
+    @discardableResult
+    static func openMeter() -> Bool {
+        guard let url = InstalledApplicationLocator.meterApplicationURL() else {
+            return false
+        }
+        NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        return true
+    }
+
     static func openChatGPT() {
-        let classicAppPath = "/Applications/ChatGPT Classic.app"
-        if FileManager.default.fileExists(atPath: classicAppPath) {
-            let url = URL(fileURLWithPath: classicAppPath, isDirectory: true)
+        if let url = InstalledApplicationLocator.chatGPTClassicApplicationURL() {
             NSWorkspace.shared.openApplication(at: url, configuration: .init())
             return
         }

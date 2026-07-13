@@ -1,5 +1,9 @@
 # Security
 
+## Supported version
+
+Security fixes are applied to the latest release, currently 2.14.x.
+
 ## Credential handling
 
 - API keys are stored in macOS Keychain.
@@ -7,6 +11,7 @@
 - Remote API endpoints that use credentials must use HTTPS.
 - Redirects may not forward credentials to a different origin.
 - API keys are not exported to the launched Codex process environment.
+- Profiles that do not require a key do not trigger Keychain value reads.
 
 ## Defensive limits
 
@@ -17,16 +22,16 @@ hop-by-hop headers are rejected.
 
 ## Reporting
 
-Please open a private security advisory in this repository. Do not include real
-API keys, session logs, or provider credentials in an issue.
+Open a private security advisory in the GitHub repository. Do not include real
+API keys, session logs, account details, or provider credentials in an issue.
 
-## Verification
+## Release verification
 
-The 2.13.0 release passed:
+Release builds must pass strict Debug and Release compilation, the built-in
+self-test on supported architecture slices, bundle validation, zip integrity,
+and signature verification. `DISTRIBUTION=1` additionally requires Developer ID
+signing, Hardened Runtime, timestamping, Apple notarization, stapling, and
+Gatekeeper acceptance.
 
-- `swift build`
-- `swift run CodexAPIManagerPlus --self-test`
-- Ad-hoc signature verification with `codesign --verify --deep --strict`
-- A real streaming Responses API request through `127.0.0.1:62139`
-
-The app is ad-hoc signed and is not Apple-notarized.
+The locally generated test artifact is ad-hoc signed because this machine does
+not currently contain a Developer ID certificate.

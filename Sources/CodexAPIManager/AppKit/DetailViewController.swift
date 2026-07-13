@@ -68,10 +68,10 @@ final class DetailViewController: NSViewController {
         activeBadge.font = .systemFont(ofSize: 12, weight: .semibold)
 
         let headerIcon = NSImageView(
-            image: NSImage(
-                systemSymbolName: "terminal.fill",
+            image: .safeSystemSymbol(
+                "terminal.fill",
                 accessibilityDescription: "API 工作台"
-            )!
+            )
         )
         headerIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
         headerIcon.contentTintColor = .controlAccentColor
@@ -149,7 +149,10 @@ final class DetailViewController: NSViewController {
         workspaceNameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         workspaceNameLabel.textColor = .labelColor
         let chooseButton = NSButton(
-            image: NSImage(systemSymbolName: "folder", accessibilityDescription: "选择项目目录")!,
+            image: .safeSystemSymbol(
+                "folder",
+                accessibilityDescription: "选择项目目录"
+            ),
             target: self,
             action: #selector(chooseDirectory)
         )
@@ -166,7 +169,10 @@ final class DetailViewController: NSViewController {
         ])
 
         let healthButton = NSButton(
-            image: NSImage(systemSymbolName: "stethoscope", accessibilityDescription: "运行检查")!,
+            image: .safeSystemSymbol(
+                "stethoscope",
+                accessibilityDescription: "运行检查"
+            ),
             target: self,
             action: #selector(runHealthCheck)
         )
@@ -383,10 +389,10 @@ final class DetailViewController: NSViewController {
 
     private func sectionLabel(title: String, systemImage: String) -> NSStackView {
         let image = NSImageView(
-            image: NSImage(
-                systemSymbolName: systemImage,
+            image: .safeSystemSymbol(
+                systemImage,
                 accessibilityDescription: title
-            )!
+            )
         )
         image.contentTintColor = .secondaryLabelColor
         image.widthAnchor.constraint(equalToConstant: 18).isActive = true

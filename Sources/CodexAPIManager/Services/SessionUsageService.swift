@@ -6,8 +6,81 @@ struct SessionUsageSnapshot: Equatable {
     let contextWindow: Int?
 }
 
+final class SessionUsageMonitor {
+    private struct FileSignature: Equatable {
+        let modifiedAt: Date
+        let size: Int
+        let fileID: UInt64
+    }
+
+    private var rootPath: String?
+    private var latestFile: URL?
+    private var latestSignature: FileSignature?
+    private var snapshot: SessionUsageSnapshot?
+    private var lastDiscovery = Date.distantPast
+
+    func latest(in sessionsDirectory: URL) -> SessionUsageSnapshot? {
+        let now = Date()
+        let rootChanged = rootPath != sessionsDirectory.path
+        let needsDiscovery = rootChanged
+            || latestFile == nil
+            || now.timeIntervalSince(lastDiscovery) >= 10
+
+        if needsDiscovery {
+            let previousFile = latestFile
+            rootPath = sessionsDirectory.path
+            latestFile = SessionUsageService.latestSessionFile(
+                in: sessionsDirectory
+            )
+            lastDiscovery = now
+            if latestFile != previousFile {
+                latestSignature = nil
+                snapshot = nil
+            }
+        }
+
+        guard let latestFile,
+              let signature = Self.signature(for: latestFile) else {
+            return nil
+        }
+        if signature == latestSignature {
+            return snapshot
+        }
+        latestSignature = signature
+        if let refreshed = SessionUsageService.snapshot(from: latestFile) {
+            snapshot = refreshed
+        }
+        return snapshot
+    }
+
+    func invalidate() {
+        lastDiscovery = .distantPast
+        latestSignature = nil
+    }
+
+    private static func signature(for url: URL) -> FileSignature? {
+        guard let attributes = try? FileManager.default.attributesOfItem(
+            atPath: url.path
+        ) else {
+            return nil
+        }
+        return FileSignature(
+            modifiedAt: attributes[.modificationDate] as? Date ?? .distantPast,
+            size: (attributes[.size] as? NSNumber)?.intValue ?? 0,
+            fileID: (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+        )
+    }
+}
+
 enum SessionUsageService {
     static func latest(in sessionsDirectory: URL) -> SessionUsageSnapshot? {
+        guard let latestFile = latestSessionFile(in: sessionsDirectory) else {
+            return nil
+        }
+        return snapshot(from: latestFile)
+    }
+
+    static func latestSessionFile(in sessionsDirectory: URL) -> URL? {
         guard let enumerator = FileManager.default.enumerator(
             at: sessionsDirectory,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
@@ -24,8 +97,11 @@ enum SessionUsageService {
                   let date = values.contentModificationDate else { continue }
             if latestFile == nil || date > latestFile!.date { latestFile = (url, date) }
         }
-        guard let url = latestFile?.url,
-              let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        return latestFile?.url
+    }
+
+    static func snapshot(from url: URL) -> SessionUsageSnapshot? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? file.close() }
 
         let end = (try? file.seekToEnd()) ?? 0

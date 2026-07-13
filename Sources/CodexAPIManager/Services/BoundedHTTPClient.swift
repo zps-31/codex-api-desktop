@@ -1,7 +1,9 @@
 import Foundation
 
 final class BoundedHTTPClient: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
-    enum ClientError: Error { case responseTooLarge, crossOriginRedirect, missingResponse }
+    enum ClientError: Error {
+        case invalidLimit, responseTooLarge, crossOriginRedirect, missingResponse
+    }
 
     private let limit: Int
     private var data = Data()
@@ -13,6 +15,7 @@ final class BoundedHTTPClient: NSObject, URLSessionDataDelegate, URLSessionTaskD
     private init(limit: Int) { self.limit = limit }
 
     static func data(for request: URLRequest, limit: Int = 4 * 1_024 * 1_024) async throws -> (Data, URLResponse) {
+        guard limit > 0 else { throw ClientError.invalidLimit }
         let client = BoundedHTTPClient(limit: limit)
         return try await client.run(request)
     }
@@ -35,7 +38,7 @@ final class BoundedHTTPClient: NSObject, URLSessionDataDelegate, URLSessionTaskD
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
-        guard chunk.count <= limit - data.count else {
+        guard data.count <= limit, chunk.count <= limit - data.count else {
             finish(.failure(ClientError.responseTooLarge))
             session.invalidateAndCancel()
             return

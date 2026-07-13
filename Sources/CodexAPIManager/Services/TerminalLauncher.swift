@@ -3,8 +3,6 @@ import Darwin
 import Foundation
 
 struct CodexDesktopLauncher {
-    private let keychain = KeychainService()
-
     func launch(
         profile: ProviderProfile,
         paths: RuntimePaths,
@@ -114,30 +112,23 @@ struct CodexDesktopLauncher {
     }
 
     private func apiCodexAppURL() throws -> URL {
-        let path = "/Applications/Codex API Plus.app"
-        guard FileManager.default.fileExists(atPath: path) else {
+        guard let url = InstalledApplicationLocator.apiCodexApplicationURL() else {
             throw LaunchError.apiAppNotFound
         }
-        return URL(fileURLWithPath: path, isDirectory: true)
+        return url
     }
 
     private func officialCodexAppURL() throws -> URL {
-        let candidates = [
-            "/Applications/Codex Office.app",
-            "/Applications/Codex.app"
-        ]
-        guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
+        guard let url = InstalledApplicationLocator.officialCodexApplicationURL() else {
             throw LaunchError.officialAppNotFound
         }
-        return URL(fileURLWithPath: path, isDirectory: true)
+        return url
     }
 
     private func bundleExecutableName(at appURL: URL) throws -> String {
-        let plistURL = appURL.appendingPathComponent("Contents/Info.plist")
-        let data = try Data(contentsOf: plistURL)
-        let plist = try PropertyListSerialization.propertyList(from: data, format: nil)
-        guard let dictionary = plist as? [String: Any],
-              let executable = dictionary["CFBundleExecutable"] as? String,
+        guard let executable = Bundle(url: appURL)?.object(
+            forInfoDictionaryKey: "CFBundleExecutable"
+        ) as? String,
               !executable.isEmpty else {
             throw LaunchError.officialExecutableNotFound
         }
@@ -153,7 +144,7 @@ enum LaunchError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .apiAppNotFound:
-            "未找到 Codex API Plus.app，请重新安装 Codex API 桌面版 Plus。"
+            "未找到 Codex API Plus 或官方 Codex 应用，请先安装其中一个。"
         case .officialAppNotFound: "未找到官方 Codex 应用。"
         case .officialExecutableNotFound: "官方 Codex 应用不完整，找不到可执行文件。"
         }

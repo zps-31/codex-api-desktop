@@ -170,20 +170,13 @@ struct CodexConfigService {
     }
 
     private func writeModelCatalog(for profiles: [ProviderProfile]) throws {
-        let candidates = [
-            "/Applications/Codex API Plus.app/Contents/Resources/codex",
-            "/Applications/Codex Office.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-            "/opt/homebrew/bin/codex",
-            "/usr/local/bin/codex"
-        ]
-        guard let codexBinary = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+        guard let codexBinary = InstalledApplicationLocator.codexCLIURL() else {
             throw ConfigServiceError.codexCLINotFound
         }
 
         let output = Pipe()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: codexBinary)
+        process.executableURL = codexBinary
         process.arguments = ["debug", "models", "--bundled"]
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
@@ -230,6 +223,8 @@ struct CodexConfigService {
     private func writeLauncher() throws {
         let support = TOMLEscaping.shellSingleQuoted(paths.supportDirectory.path)
         let codexHome = TOMLEscaping.shellSingleQuoted(paths.codexHome.path)
+        let resolvedCodex = InstalledApplicationLocator.codexCLIURL()
+            .map { TOMLEscaping.shellSingleQuoted($0.path) } ?? "''"
 
         let script = """
         #!/bin/zsh
@@ -242,13 +237,7 @@ struct CodexConfigService {
         PROFILE_ID="$(/bin/cat "$SUPPORT_DIR/active-profile" | /usr/bin/tr -d '\\r\\n')"
         WORKING_DIR="$(/bin/cat "$SUPPORT_DIR/working-directory" | /usr/bin/tr -d '\\r\\n')"
 
-        CODEX_BIN=""
-        for candidate in /opt/homebrew/bin/codex /usr/local/bin/codex "/Applications/Codex API Plus.app/Contents/Resources/codex" "/Applications/Codex Office.app/Contents/Resources/codex"; do
-          if [[ -x "$candidate" ]]; then
-            CODEX_BIN="$candidate"
-            break
-          fi
-        done
+        CODEX_BIN=\(resolvedCodex)
         if [[ -z "$CODEX_BIN" ]]; then
           CODEX_BIN="$(/bin/zsh -lic 'command -v codex' | /usr/bin/tail -n 1)"
         fi

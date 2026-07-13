@@ -228,12 +228,11 @@ struct TaskBridge {
     }
 
     static func billingProvider(for profile: ProviderProfile) -> String? {
-        let baseURL = profile.baseURL.lowercased()
-        if baseURL.contains("micuapi.ai") { return "micu" }
-        if baseURL.contains("cctq.ai") { return "cctq" }
         guard let components = URLComponents(string: profile.baseURL),
               let scheme = components.scheme?.lowercased(),
               let host = components.host?.lowercased() else { return nil }
+        if host == "micuapi.ai" || host.hasSuffix(".micuapi.ai") { return "micu" }
+        if host == "cctq.ai" || host.hasSuffix(".cctq.ai") { return "cctq" }
         var origin = "\(scheme)://\(host)"
         if let port = components.port { origin += ":\(port)" }
         return "origin:\(origin)"

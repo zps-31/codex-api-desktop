@@ -13,8 +13,16 @@ enum SelfTest {
 
         let local = ProviderProfile.template(.ollama)
         try local.validate(requireStoredKey: true, hasStoredKey: false)
+        try expect(
+            ProfileStore.isAvailable(local, hasStoredKey: false),
+            "keyless local profile availability"
+        )
 
         let remote = ProviderProfile.template(.openAI)
+        try expect(
+            !ProfileStore.isAvailable(remote, hasStoredKey: false),
+            "remote profile requires a key"
+        )
         do {
             try remote.validate(requireStoredKey: true, hasStoredKey: false)
             throw SelfTestError.failed("remote key validation")
@@ -59,6 +67,7 @@ enum SelfTest {
         try verifySecretFreeAuthFile()
         try verifyTaskHistoryReconciliation()
         try verifySessionUsageReading()
+        try verifyApplicationLocation()
         try expect(!ProxyHeaderPolicy.forwardsRequest("Accept-Encoding"), "request decompression policy")
         try expect(!ProxyHeaderPolicy.forwardsResponse("Content-Encoding"), "response decompression policy")
         try expect(ProxyHeaderPolicy.forwardsResponse("Content-Type"), "response content type")
@@ -114,6 +123,12 @@ enum SelfTest {
         try expect(
             TaskBridge.billingProvider(for: customRelay) == "origin:https://botcf.com",
             "custom billing provider origin"
+        )
+        customRelay.baseURL = "https://cctq.ai.example.com/v1"
+        try expect(
+            TaskBridge.billingProvider(for: customRelay)
+                == "origin:https://cctq.ai.example.com",
+            "billing provider lookalike domain"
         )
         let proxy = APIProxyServer()
         try proxy.ensureReady(port: 0)
@@ -214,6 +229,66 @@ enum SelfTest {
         try expect(snapshot?.totalTokens == 12_345, "current session usage")
         try expect(snapshot?.lastRequestTokens == 678, "last request usage")
         try expect(snapshot?.contextWindow == 200_000, "context window usage")
+
+        let monitor = SessionUsageMonitor()
+        try expect(
+            monitor.latest(in: directory)?.totalTokens == 12_345,
+            "session monitor initial value"
+        )
+        let updatedFixture = """
+        {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":23456},"last_token_usage":{"total_tokens":789},"model_context_window":200000}}}
+        """
+        try Data(updatedFixture.utf8).write(
+            to: directory.appendingPathComponent("rollout.jsonl")
+        )
+        try expect(
+            monitor.latest(in: directory)?.totalTokens == 23_456,
+            "session monitor refresh"
+        )
+    }
+
+    private static func verifyApplicationLocation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let app = root.appendingPathComponent("Portable Fixture.app", isDirectory: true)
+        let contents = app.appendingPathComponent("Contents", isDirectory: true)
+        let macOS = contents.appendingPathComponent("MacOS", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: macOS,
+            withIntermediateDirectories: true
+        )
+        let executable = macOS.appendingPathComponent("PortableFixture")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: executable.path
+        )
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": "com.example.portable-fixture",
+            "CFBundleExecutable": "PortableFixture",
+            "CFBundlePackageType": "APPL"
+        ]
+        let plistData = try PropertyListSerialization.data(
+            fromPropertyList: plist,
+            format: .xml,
+            options: 0
+        )
+        try plistData.write(to: contents.appendingPathComponent("Info.plist"))
+
+        let located = InstalledApplicationLocator.applicationURL(
+            bundleIdentifiers: ["com.example.portable-fixture"],
+            names: ["Portable Fixture.app"],
+            additionalDirectories: [root]
+        )
+        try expect(located?.path == app.path, "portable application location")
+        try expect(
+            !InstalledApplicationLocator.isValidApplication(
+                at: app,
+                acceptedBundleIdentifiers: ["com.example.other"]
+            ),
+            "application bundle ID validation"
+        )
     }
 
     private static func verifyChunkedRequestParsing() throws {

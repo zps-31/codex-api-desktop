@@ -1,6 +1,7 @@
 import AppKit
 
 final class MainWindowController: NSWindowController,
+    NSWindowDelegate,
     SidebarViewControllerDelegate,
     DetailViewControllerDelegate {
 
@@ -11,6 +12,7 @@ final class MainWindowController: NSWindowController,
     private let currentSessionValue = NSTextField(labelWithString: "--")
     private let lastRequestValue = NSTextField(labelWithString: "--")
     private let contextValue = NSTextField(labelWithString: "--")
+    private let usageMonitor = SessionUsageMonitor()
     private var usageTimer: Timer?
 
     init(store: ProfileStore) {
@@ -22,6 +24,7 @@ final class MainWindowController: NSWindowController,
             defer: false
         )
         super.init(window: window)
+        window.delegate = self
         window.title = "Codex API Desktop Plus"
         window.minSize = NSSize(width: 940, height: 660)
         window.setFrameAutosaveName("CodexAPIManagerPlus.MainWindow")
@@ -31,18 +34,37 @@ final class MainWindowController: NSWindowController,
         configureContent()
         refresh()
         refreshUsage()
-        usageTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.refreshUsage()
-        }
     }
 
     required init?(coder: NSCoder) { nil }
 
     deinit { usageTimer?.invalidate() }
 
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        refreshUsage()
+        updateUsageTimer()
+    }
+
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        updateUsageTimer()
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        updateUsageTimer()
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        updateUsageTimer()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        stopUsageTimer()
+    }
+
     func launchActiveProfileIfReady() {
         guard let activeProfile = store.activeProfile,
-              store.hasKey(for: activeProfile) else { return }
+              store.isAvailable(activeProfile) else { return }
         store.selection = activeProfile.id
         store.launchSelected()
         refresh()
@@ -144,10 +166,31 @@ final class MainWindowController: NSWindowController,
     }
 
     private func refreshUsage() {
-        let snapshot = SessionUsageService.latest(in: store.sessionsDirectory)
+        let snapshot = usageMonitor.latest(in: store.sessionsDirectory)
         currentSessionValue.stringValue = compact(snapshot?.totalTokens)
         lastRequestValue.stringValue = compact(snapshot?.lastRequestTokens)
         contextValue.stringValue = compact(snapshot?.contextWindow)
+    }
+
+    private func updateUsageTimer() {
+        guard let window,
+              window.isVisible,
+              !window.isMiniaturized,
+              window.occlusionState.contains(.visible) else {
+            stopUsageTimer()
+            return
+        }
+        guard usageTimer == nil else { return }
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            self?.refreshUsage()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        usageTimer = timer
+    }
+
+    private func stopUsageTimer() {
+        usageTimer?.invalidate()
+        usageTimer = nil
     }
 
     private func compact(_ value: Int?) -> String {
@@ -265,6 +308,7 @@ final class MainWindowController: NSWindowController,
 
     func detailDidRequestLaunch(profile: ProviderProfile, workingDirectory: String) {
         update(profile: profile, workingDirectory: workingDirectory)
+        usageMonitor.invalidate()
         store.healthCheckAndLaunch { [weak self] in self?.refresh() }
         refresh()
     }
@@ -299,9 +343,12 @@ final class MainWindowController: NSWindowController,
     }
 
     @objc private func openMeter() {
-        let url = URL(fileURLWithPath: "/Applications/Codex Meter Plus.app", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        if ExternalAppLauncher.openMeter() {
+            store.statusMessage = "已打开 Codex Meter Plus"
+        } else {
+            store.statusMessage = "未找到 Codex Meter Plus，可将应用放在任意常用位置后重试"
+        }
+        refresh()
     }
 
     @objc private func openChatGPT() {

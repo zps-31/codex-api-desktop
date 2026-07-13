@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 final class ProfileStore {
@@ -16,7 +17,8 @@ final class ProfileStore {
     private var configService: CodexConfigService
     private let launcher = CodexDesktopLauncher()
     private let proxy = APIProxyServer()
-    private var modelSyncTimer: DispatchSourceTimer?
+    private var runtimeMonitorTimer: DispatchSourceTimer?
+    private var configurationWatcher: DispatchSourceFileSystemObject?
     private var lastCodexConfiguration: CodexConfigurationSignature?
 
     init() {
@@ -58,7 +60,7 @@ final class ProfileStore {
         } catch {
             report(error)
         }
-        startModelSyncTimer()
+        startRuntimeMonitoring()
     }
 
     var selectedProfile: ProviderProfile? {
@@ -73,13 +75,13 @@ final class ProfileStore {
 
     var runtimeDirectory: String { configService.paths.supportDirectory.path }
     var sessionsDirectory: URL { configService.paths.codexHome.appendingPathComponent("sessions", isDirectory: true) }
-    var availableProfiles: [ProviderProfile] { keyedProfiles }
+    var availableProfiles: [ProviderProfile] { usableProfiles }
     var routerIsReady: Bool { proxy.isReady }
     var codexIsRunning: Bool { launcher.isRunning(paths: configService.paths) }
     var runtimeStatusText: String {
         let router = routerIsReady ? "路由正常" : "路由异常"
         let codex = codexIsRunning ? "API Codex 运行中" : "API Codex 未运行"
-        return "\(router) · \(keyedProfiles.count) 个模型 · \(codex)"
+        return "\(router) · \(usableProfiles.count) 个模型 · \(codex)"
     }
 
     func addProfile(_ preset: ProviderPreset) {
@@ -135,7 +137,7 @@ final class ProfileStore {
             try synchronizeRuntime()
             try persistProfilesThrowing()
             if codexWasRunning { try relaunchActiveCodex() }
-            statusMessage = "配置已保存 · 已同步 \(keyedProfiles.count) 个有密钥模型"
+            statusMessage = "配置已保存 · 已同步 \(usableProfiles.count) 个可用模型"
         } catch {
             report(error)
         }
@@ -171,7 +173,18 @@ final class ProfileStore {
 
     func hasKey(for profile: ProviderProfile) -> Bool {
         guard profile.authenticationMode.needsKey else { return false }
-        return (try? apiKey(for: profile)) != nil
+        return keychain.contains(account: profile.id.uuidString)
+    }
+
+    func isAvailable(_ profile: ProviderProfile) -> Bool {
+        Self.isAvailable(profile, hasStoredKey: hasKey(for: profile))
+    }
+
+    static func isAvailable(
+        _ profile: ProviderProfile,
+        hasStoredKey: Bool
+    ) -> Bool {
+        !profile.authenticationMode.needsKey || hasStoredKey
     }
 
     func activate(_ profile: ProviderProfile) {
@@ -183,7 +196,7 @@ final class ProfileStore {
             _ = try apiKey(for: profile)
             try configService.writeConfiguration(
                 for: profile,
-                profiles: keyedProfiles,
+                profiles: usableProfiles,
                 workingDirectory: workingDirectory
             )
             let previousActiveProfileID = activeProfileID
@@ -352,7 +365,8 @@ final class ProfileStore {
     }
 
     private func apiKey(for profile: ProviderProfile) throws -> String? {
-        try keychain.read(account: profile.id.uuidString)
+        guard profile.authenticationMode.needsKey else { return nil }
+        return try keychain.read(account: profile.id.uuidString)
     }
 
     private func persistProfilesThrowing() throws {
@@ -368,12 +382,12 @@ final class ProfileStore {
         try data.write(to: configService.paths.profilesFile, options: .atomic)
     }
 
-    private var keyedProfiles: [ProviderProfile] {
-        profiles.filter(hasKey)
+    private var usableProfiles: [ProviderProfile] {
+        profiles.filter(isAvailable)
     }
 
     private func synchronizeRuntime(preferredProfile: ProviderProfile? = nil) throws {
-        let available = keyedProfiles
+        let available = usableProfiles
         let routes = available.map { profile in
             APIProxyRoute(
                 alias: CodexConfigService.modelAlias(for: profile, in: available),
@@ -401,7 +415,7 @@ final class ProfileStore {
     }
 
     private func reconcileActiveProfileFromCodex() {
-        let available = keyedProfiles
+        let available = usableProfiles
         guard let configured = configService.configuredModel(),
               let matched = available.first(where: {
                   CodexConfigService.modelAlias(for: $0, in: available) == configured
@@ -414,13 +428,13 @@ final class ProfileStore {
         statusMessage = "Codex 已切换到 \(matched.name) / \(matched.model)"
     }
 
-    private func startModelSyncTimer() {
+    private func startRuntimeMonitoring() {
         let configFile = configService.paths.codexHome.appendingPathComponent("config.toml")
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         timer.schedule(
-            deadline: .now() + 3,
-            repeating: 3,
-            leeway: .milliseconds(500)
+            deadline: .now() + 15,
+            repeating: 15,
+            leeway: .seconds(2)
         )
         timer.setEventHandler { [weak self] in
             let configuration = CodexConfigService.configurationSignature(at: configFile)
@@ -429,10 +443,35 @@ final class ProfileStore {
             }
         }
         timer.resume()
-        modelSyncTimer = timer
+        runtimeMonitorTimer = timer
+
+        let descriptor = open(configService.paths.codexHome.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let watcher = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete, .extend, .attrib],
+            queue: .global(qos: .utility)
+        )
+        watcher.setEventHandler { [weak self] in
+            let configuration = CodexConfigService.configurationSignature(
+                at: configFile
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.handleRuntimeTick(configuration)
+            }
+        }
+        watcher.setCancelHandler {
+            close(descriptor)
+        }
+        watcher.resume()
+        configurationWatcher = watcher
     }
 
     private func handleRuntimeTick(_ configuration: CodexConfigurationSignature?) {
+        let reconciledHistory = TaskBridge.reconcileHistory()
+        if reconciledHistory != launchHistory {
+            launchHistory = reconciledHistory
+        }
         if configuration != lastCodexConfiguration {
             lastCodexConfiguration = configuration
             reconcileActiveProfileFromCodex()
@@ -467,6 +506,12 @@ final class ProfileStore {
         errorMessage = error.localizedDescription
         showingError = true
         statusMessage = "操作未完成"
+    }
+
+    deinit {
+        runtimeMonitorTimer?.cancel()
+        configurationWatcher?.cancel()
+        proxy.stop()
     }
 }
 

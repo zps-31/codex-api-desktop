@@ -100,9 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openMeter() {
-        let url = URL(fileURLWithPath: "/Applications/Codex Meter Plus.app", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        ExternalAppLauncher.openMeter()
     }
 
     @objc private func openChatGPT() {

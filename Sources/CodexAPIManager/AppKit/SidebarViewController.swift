@@ -43,7 +43,11 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         presetPopup.addItems(withTitles: ProviderPreset.creationCases.map(\.title))
         presetPopup.controlSize = .small
 
-        let addButton = NSButton(image: NSImage(systemSymbolName: "plus", accessibilityDescription: "添加")!, target: self, action: #selector(addProfile))
+        let addButton = NSButton(
+            image: .safeSystemSymbol("plus", accessibilityDescription: "添加"),
+            target: self,
+            action: #selector(addProfile)
+        )
         addButton.bezelStyle = .texturedRounded
         addButton.toolTip = "添加所选模板"
         duplicateButton.image = NSImage(systemSymbolName: "square.on.square", accessibilityDescription: "复制")
@@ -107,7 +111,12 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let profile = profiles[row]
         let cell = NSTableCellView()
-        let image = NSImageView(image: NSImage(systemSymbolName: profile.preset.icon, accessibilityDescription: nil)!)
+        let image = NSImageView(
+            image: .safeSystemSymbol(
+                profile.preset.icon,
+                accessibilityDescription: nil
+            )
+        )
         image.contentTintColor = activeProfileID == profile.id ? .systemGreen : .secondaryLabelColor
         image.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
 
