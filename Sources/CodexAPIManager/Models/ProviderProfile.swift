@@ -340,11 +340,13 @@ enum ProfileValidationError: LocalizedError {
     case emptyName
     case invalidBaseURL
     case emptyModel
+    case invalidModel
     case unsupportedWireAPI
     case emptyAuthenticationHeader
     case missingKey
     case invalidTaskBudget
     case insecureCredentialTransport
+    case embeddedURLCredentials
     case invalidAuthenticationHeader
 
     var errorDescription: String? {
@@ -352,11 +354,13 @@ enum ProfileValidationError: LocalizedError {
         case .emptyName: "请填写配置名称。"
         case .invalidBaseURL: "API Base URL 必须是有效的 http 或 https 地址。"
         case .emptyModel: "请填写模型 ID。"
+        case .invalidModel: "模型 ID 不能包含控制字符，且不能超过 256 个字节。"
         case .unsupportedWireAPI: "当前 Codex CLI 仅支持 Responses 协议。"
         case .emptyAuthenticationHeader: "请填写认证请求头名称。"
         case .missingKey: "这个配置需要 API Key，请先保存到钥匙串。"
         case .invalidTaskBudget: "单任务预算必须是 0 或正数。"
         case .insecureCredentialTransport: "带 API Key 的远程地址必须使用 https；http 仅允许本机地址。"
+        case .embeddedURLCredentials: "Base URL 不能包含用户名或密码；凭据必须保存到 macOS 钥匙串。"
         case .invalidAuthenticationHeader: "认证请求头名称无效或属于受保护的网络请求头。"
         }
     }
@@ -370,16 +374,29 @@ extension ProviderProfile {
         guard let components = URLComponents(string: baseURL),
               let scheme = components.scheme?.lowercased(),
               ["http", "https"].contains(scheme),
-              components.host != nil else {
+              components.host != nil,
+              baseURL.utf8.count <= 2_048,
+              components.fragment == nil else {
             throw ProfileValidationError.invalidBaseURL
+        }
+        guard components.user == nil, components.password == nil else {
+            throw ProfileValidationError.embeddedURLCredentials
         }
         let host = components.host?.lowercased() ?? ""
         let loopbackHosts = ["localhost", "127.0.0.1", "::1", "[::1]"]
         if authenticationMode.needsKey, scheme != "https", !loopbackHosts.contains(host) {
             throw ProfileValidationError.insecureCredentialTransport
         }
-        guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let modelID = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !modelID.isEmpty else {
             throw ProfileValidationError.emptyModel
+        }
+        guard modelID == model,
+              modelID.utf8.count <= 256,
+              !modelID.unicodeScalars.contains(where: {
+                  CharacterSet.controlCharacters.contains($0)
+              }) else {
+            throw ProfileValidationError.invalidModel
         }
         guard wireAPI == "responses" else {
             throw ProfileValidationError.unsupportedWireAPI

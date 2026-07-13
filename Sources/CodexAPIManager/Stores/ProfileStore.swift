@@ -22,9 +22,7 @@ final class ProfileStore {
     private var lastCodexConfiguration: CodexConfigurationSignature?
 
     init() {
-        let fallbackDirectory = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Codex", isDirectory: true).path
-        workingDirectory = fallbackDirectory
+        workingDirectory = WorkspacePathResolver.defaultWorkingDirectory()
 
         do {
             let paths = try CodexConfigService.defaultPaths()
@@ -318,7 +316,7 @@ final class ProfileStore {
             let state = try JSONDecoder().decode(PersistedState.self, from: data)
             profiles = Array(state.profiles.prefix(500))
             activeProfileID = state.activeProfileID
-            workingDirectory = state.workingDirectory
+            workingDirectory = WorkspacePathResolver.resolve(state.workingDirectory)
         } else {
             profiles = [.template(.openAI), .template(.ollama), .template(.generic)]
         }
@@ -338,6 +336,16 @@ final class ProfileStore {
         }
         if migratedProfiles != profiles {
             profiles = migratedProfiles
+            try persistProfilesThrowing()
+        }
+        let portableProfiles = profiles.map { profile -> ProviderProfile in
+            guard let workspacePath = profile.workspacePath else { return profile }
+            var migrated = profile
+            migrated.workspacePath = WorkspacePathResolver.resolve(workspacePath)
+            return migrated
+        }
+        if portableProfiles != profiles {
+            profiles = portableProfiles
             try persistProfilesThrowing()
         }
         var seenProfileKeys: [String: UUID] = [:]
@@ -381,6 +389,10 @@ final class ProfileStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(state)
         try data.write(to: configService.paths.profilesFile, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: configService.paths.profilesFile.path
+        )
     }
 
     private var usableProfiles: [ProviderProfile] {

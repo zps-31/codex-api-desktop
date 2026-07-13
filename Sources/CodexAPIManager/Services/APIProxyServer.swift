@@ -155,7 +155,7 @@ final class APIProxyServer {
         }
         object["model"] = route.model
         guard let body = try? JSONSerialization.data(withJSONObject: object),
-              let url = upstreamURL(baseURL: route.baseURL, requestPath: incoming.path) else {
+              let url = Self.upstreamURL(baseURL: route.baseURL, requestPath: incoming.path) else {
             sendError(400, "配置“\(route.profileName)”的 Base URL 无效", on: connection)
             return
         }
@@ -188,10 +188,26 @@ final class APIProxyServer {
         ProxyURLSession(request: request, connection: connection).start()
     }
 
-    private func upstreamURL(baseURL: String, requestPath: String) -> URL? {
-        let root = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let suffix = requestPath.hasPrefix("/v1/") ? String(requestPath.dropFirst(3)) : requestPath
-        return URL(string: root + (suffix.hasPrefix("/") ? suffix : "/" + suffix))
+    static func upstreamURL(baseURL: String, requestPath: String) -> URL? {
+        guard var components = URLComponents(string: baseURL),
+              components.scheme != nil,
+              components.host != nil else {
+            return nil
+        }
+        let requestParts = requestPath.split(separator: "?", maxSplits: 1)
+        let rawPath = String(requestParts.first ?? "")
+        let suffix = rawPath.hasPrefix("/v1/")
+            ? String(rawPath.dropFirst(3))
+            : rawPath
+        let rootPath = components.path.hasSuffix("/")
+            ? String(components.path.dropLast())
+            : components.path
+        components.path = rootPath + (suffix.hasPrefix("/") ? suffix : "/" + suffix)
+        if components.percentEncodedQuery == nil, requestParts.count == 2 {
+            components.percentEncodedQuery = String(requestParts[1])
+        }
+        components.fragment = nil
+        return components.url
     }
 
     private func sendError(_ status: Int, _ message: String, on connection: NWConnection) {

@@ -67,6 +67,9 @@ enum SelfTest {
         try expect(WorkScenario.deepDebug.modelReasoningEffort == "xhigh", "debug reasoning")
         try verifySecretFreeAuthFile()
         try verifyIsolatedDesktopEnvironment()
+        try verifyPortableWorkspaceResolution()
+        try verifyLogRotation()
+        try verifyEscapedModelConfiguration()
         try verifyTaskHistoryReconciliation()
         try verifySessionUsageReading()
         try verifyApplicationLocation()
@@ -75,6 +78,7 @@ enum SelfTest {
         try expect(ProxyHeaderPolicy.forwardsResponse("Content-Type"), "response content type")
         try verifyChunkedRequestParsing()
         try verifyMalformedRequestRejection()
+        try verifyUpstreamURLConstruction()
         try verifyCredentialTransportValidation()
 
         let legacyProfile = """
@@ -143,6 +147,29 @@ enum SelfTest {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: codexHome,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: root.path
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: codexHome.path
+        )
+        let existingProfiles = root.appendingPathComponent("profiles.json")
+        let existingLog = root.appendingPathComponent("desktop.log")
+        let existingLauncher = root.appendingPathComponent("launcher.command")
+        for file in [existingProfiles, existingLog, existingLauncher] {
+            try Data().write(to: file)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o644],
+                ofItemAtPath: file.path
+            )
+        }
         let paths = RuntimePaths(
             supportDirectory: root,
             profilesFile: root.appendingPathComponent("profiles.json"),
@@ -162,6 +189,39 @@ enum SelfTest {
         try service.prepareDirectories()
         try service.writeEmptyAuthFile()
 
+        for directory in [
+            paths.supportDirectory,
+            paths.codexHome,
+            paths.desktopHomeDirectory,
+            paths.desktopDataDirectory
+        ] {
+            let directoryAttributes = try FileManager.default.attributesOfItem(
+                atPath: directory.path
+            )
+            try expect(
+                (directoryAttributes[.posixPermissions] as? NSNumber)?.intValue
+                    == 0o700,
+                "private runtime directory permissions"
+            )
+        }
+        for file in [paths.profilesFile, paths.desktopLogFile] {
+            let fileAttributes = try FileManager.default.attributesOfItem(
+                atPath: file.path
+            )
+            try expect(
+                (fileAttributes[.posixPermissions] as? NSNumber)?.intValue
+                    == 0o600,
+                "existing private runtime file permissions"
+            )
+        }
+        let launcherAttributes = try FileManager.default.attributesOfItem(
+            atPath: paths.launcherFile.path
+        )
+        try expect(
+            (launcherAttributes[.posixPermissions] as? NSNumber)?.intValue
+                == 0o700,
+            "existing launcher permissions"
+        )
         let data = try Data(contentsOf: paths.authFile)
         let object = try JSONSerialization.jsonObject(with: data) as? [String: String]
         try expect(object?.isEmpty == true, "secret-free auth file")
@@ -224,6 +284,93 @@ enum SelfTest {
         try expect(environment["OPENAI_BASE_URL"] == nil, "removed OpenAI base URL")
     }
 
+    private static func verifyPortableWorkspaceResolution() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let home = root.appendingPathComponent("new-home", isDirectory: true)
+        let documents = home.appendingPathComponent("Documents", isDirectory: true)
+        let project = documents.appendingPathComponent("Portable Project", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: project,
+            withIntermediateDirectories: true
+        )
+
+        try expect(
+            WorkspacePathResolver.defaultWorkingDirectory(home: home) == documents.path,
+            "portable Documents fallback"
+        )
+        try expect(
+            WorkspacePathResolver.resolve(
+                "/Users/old-user/Documents/Portable Project",
+                home: home
+            ) == project.path,
+            "portable workspace user rebasing"
+        )
+
+        let codex = documents.appendingPathComponent("Codex", isDirectory: true)
+        try FileManager.default.createDirectory(at: codex, withIntermediateDirectories: true)
+        try expect(
+            WorkspacePathResolver.resolve(
+                "/Users/old-user/Documents/Missing",
+                home: home
+            ) == codex.path,
+            "portable Codex fallback"
+        )
+        try expect(
+            WorkspacePathResolver.resolve(
+                "/Volumes/Temporarily Offline/Project",
+                home: home
+            ) == "/Volumes/Temporarily Offline/Project",
+            "preserved external workspace"
+        )
+    }
+
+    private static func verifyLogRotation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let log = root.appendingPathComponent("desktop.log")
+        let previous = root.appendingPathComponent("desktop.previous.log")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data(repeating: 65, count: 9 * 1_024 * 1_024).write(to: log)
+
+        try CodexDesktopLauncher.prepareLogFile(at: log)
+        let attributes = try FileManager.default.attributesOfItem(atPath: log.path)
+        let previousAttributes = try FileManager.default.attributesOfItem(
+            atPath: previous.path
+        )
+        try expect(
+            (attributes[.size] as? NSNumber)?.intValue == 0,
+            "rotated active log"
+        )
+        try expect(
+            (previousAttributes[.size] as? NSNumber)?.intValue
+                == 4 * 1_024 * 1_024,
+            "bounded previous log"
+        )
+        try expect(
+            (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600,
+            "private log permissions"
+        )
+    }
+
+    private static func verifyEscapedModelConfiguration() throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let model = "provider/model\"variant"
+        try "model = \"\(TOMLEscaping.string(model))\"\n".write(
+            to: file,
+            atomically: true,
+            encoding: .utf8
+        )
+        try expect(
+            CodexConfigService.configuredModel(at: file) == model,
+            "escaped model configuration"
+        )
+    }
+
     private static func verifyTaskHistoryReconciliation() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -259,6 +406,24 @@ enum SelfTest {
         let history = TaskBridge.reconcileHistory(in: directory, now: now)
         try expect(history.first?.status == "finished", "finished task status")
         try expect(history.first?.endedAt == now, "finished task time")
+        let directoryAttributes = try FileManager.default.attributesOfItem(
+            atPath: directory.path
+        )
+        try expect(
+            (directoryAttributes[.posixPermissions] as? NSNumber)?.intValue
+                == 0o700,
+            "private task bridge directory permissions"
+        )
+        let historyAttributes = try FileManager.default.attributesOfItem(
+            atPath: directory.appendingPathComponent(
+                TaskBridge.historyFilename
+            ).path
+        )
+        try expect(
+            (historyAttributes[.posixPermissions] as? NSNumber)?.intValue
+                == 0o600,
+            "private task history permissions"
+        )
         try expect(
             !FileManager.default.fileExists(
                 atPath: directory.appendingPathComponent(
@@ -301,6 +466,23 @@ enum SelfTest {
     }
 
     private static func verifyApplicationLocation() throws {
+        try expect(
+            !InstalledApplicationLocator.supportsExecutableArchitectures(
+                [NSNumber(value: NSBundleExecutableArchitectureARM64)],
+                hostArchitectures: [NSBundleExecutableArchitectureX86_64]
+            ),
+            "incompatible application architecture rejection"
+        )
+        try expect(
+            InstalledApplicationLocator.supportsExecutableArchitectures(
+                [
+                    NSNumber(value: NSBundleExecutableArchitectureARM64),
+                    NSNumber(value: NSBundleExecutableArchitectureX86_64)
+                ],
+                hostArchitectures: [NSBundleExecutableArchitectureX86_64]
+            ),
+            "universal application architecture acceptance"
+        )
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let app = root.appendingPathComponent("Portable Fixture.app", isDirectory: true)
@@ -372,6 +554,23 @@ enum SelfTest {
         try expect(HTTPProxyRequest.parse(Data(hugeChunk.utf8)) == nil, "overflowing chunk size")
     }
 
+    private static func verifyUpstreamURLConstruction() throws {
+        let withBaseQuery = APIProxyServer.upstreamURL(
+            baseURL: "https://example.com/v1?api-version=2026-07-01",
+            requestPath: "/v1/responses?stream=true"
+        )
+        try expect(withBaseQuery?.path == "/v1/responses", "upstream response path")
+        try expect(
+            withBaseQuery?.query == "api-version=2026-07-01",
+            "preserved base URL query"
+        )
+        let withRequestQuery = APIProxyServer.upstreamURL(
+            baseURL: "https://example.com/v1",
+            requestPath: "/v1/responses?stream=true"
+        )
+        try expect(withRequestQuery?.query == "stream=true", "preserved request query")
+    }
+
     private static func verifyCredentialTransportValidation() throws {
         var insecure = ProviderProfile.template(.generic)
         insecure.baseURL = "http://example.com/v1"
@@ -388,6 +587,20 @@ enum SelfTest {
             try protectedHeader.validate(requireStoredKey: false, hasStoredKey: true)
             throw SelfTestError.failed("protected authentication header")
         } catch ProfileValidationError.invalidAuthenticationHeader {}
+
+        var embeddedCredentials = ProviderProfile.template(.generic)
+        embeddedCredentials.baseURL = "https://user:password@example.com/v1"
+        do {
+            try embeddedCredentials.validate(requireStoredKey: false, hasStoredKey: true)
+            throw SelfTestError.failed("embedded URL credentials")
+        } catch ProfileValidationError.embeddedURLCredentials {}
+
+        var injectedModel = ProviderProfile.template(.generic)
+        injectedModel.model = "model\"\napproval_policy=\"never"
+        do {
+            try injectedModel.validate(requireStoredKey: false, hasStoredKey: true)
+            throw SelfTestError.failed("model config injection")
+        } catch ProfileValidationError.invalidModel {}
     }
 
     private static func expect(_ condition: @autoclosure () -> Bool, _ name: String) throws {

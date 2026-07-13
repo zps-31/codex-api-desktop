@@ -15,6 +15,10 @@
 - 请求解析崩溃：拒绝负数、溢出或超过 16 MiB 的 `Content-Length`/chunked 请求体。
 - 内存耗尽：代理写队列上限 8 MiB，普通 HTTP 响应上限 4 MiB，错误响应上限约 1 MiB。
 - 本地文件耗尽：会话枚举、JSONL、配置和任务桥接文件均设置数量/大小上限。
+- 旧权限迁移：已有运行目录、配置、模型目录、PID 和日志文件会在启动时
+  重新收紧为仅当前用户可访问。
+- 元数据耗尽：Meter 会话索引和模型目录读取上限为 8 MiB，不再常驻保存
+  整份文件副本。
 - 计数溢出：Meter token 汇总改为饱和加法，恶意极值不会触发 Swift 整数陷阱。
 - 自定义认证头：只接受 RFC token 字符并拒绝 `Host`、`Content-Length`、`Connection`、`Transfer-Encoding`。
 
@@ -27,7 +31,9 @@
 - 实际 Codex CLI 经 `127.0.0.1:62139/v1/responses` 完成流式请求并返回 `SECURITY_OK`。
 - 2026-07-13 的官方 Codex 事件仅返回 10080 分钟周窗口，旧 300 分钟
   窗口已不再返回；Meter 的运行态选择与新额度规则一致。
-- 候选版本：Codex API 桌面版 Plus 2.14.1；Codex Meter Plus 2.5.1。
+- 官方 `gpt-5.5` 与 API 私有 `gpt-5.6-sol` 并行真实请求均成功，官方
+  配置哈希在两次请求前后保持不变。
+- 候选版本：Codex API 桌面版 Plus 2.14.2；Codex Meter Plus 2.5.2。
 
 ## 性能与兼容性复查
 
@@ -35,14 +41,14 @@
 - API Codex 使用独立 `HOME`、Core Foundation home、XDG、`CODEX_HOME`
   和 Electron 数据目录；与官方 ChatGPT Codex 并行运行时不会改写
   `~/.codex/config.toml`。
-- Meter 对两套约 230 MiB 会话历史的冷启动解析约消耗 1.65 秒 CPU。
-- Meter 2.5.1 使用惰性聚合避免每次刷新复制完整历史记录；133 秒、跨两次
-  刷新的窗口内累计 CPU 增加约 0.83 秒，真实物理占用为 50–53 MiB 并
-  回落到约 50 MiB，可归因内存分配约 8.9 MiB。
-- API 管理器在前台和隐藏窗口的 35 秒健康检查周期内分别仅增加约
-  0.09 秒和 0.13 秒 CPU，真实物理占用约 52 MiB。
+- Meter 对官方约 10.58 亿和 API Plus 约 10.87 亿 Token 的真实历史验证
+  通过；35 秒累计 CPU 增加约 0.03 秒，RSS 回落到约 55.8 MiB。
+- API 管理器在真实路由运行的 35 秒窗口内累计 CPU 增加约 0.12 秒，
+  RSS 回落到约 27.7 MiB。
 - Meter 改为固定缓冲区流式解析后，能够计入此前被 64 MiB 上限整份忽略的
   89 MiB 有效会话文件。
+- 两款应用会自动迁移旧用户路径；不兼容当前 Mac 架构的 Codex 候选会被
+  跳过并回退到可执行的官方安装。
 
 ## 正式分发门槛
 

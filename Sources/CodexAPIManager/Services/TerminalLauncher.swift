@@ -19,7 +19,7 @@ struct CodexDesktopLauncher {
             throw LaunchError.officialExecutableNotFound
         }
 
-        terminatePreviousInstance(paths: paths)
+        try terminatePreviousInstance(paths: paths)
         try FileManager.default.createDirectory(
             at: paths.desktopDataDirectory,
             withIntermediateDirectories: true,
@@ -31,9 +31,7 @@ struct CodexDesktopLauncher {
             paths: paths
         )
 
-        if !FileManager.default.fileExists(atPath: paths.desktopLogFile.path) {
-            FileManager.default.createFile(atPath: paths.desktopLogFile.path, contents: nil)
-        }
+        try Self.prepareLogFile(at: paths.desktopLogFile)
         let logHandle = try FileHandle(forWritingTo: paths.desktopLogFile)
         try logHandle.seekToEnd()
 
@@ -89,10 +87,45 @@ struct CodexDesktopLauncher {
         return environment
     }
 
-    private func terminatePreviousInstance(paths: RuntimePaths) {
+    static func prepareLogFile(at url: URL) throws {
+        let fileManager = FileManager.default
+        let maximumBytes = 8 * 1_024 * 1_024
+        let retainedBytes: UInt64 = 4 * 1_024 * 1_024
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if size > maximumBytes {
+            let previous = url.deletingPathExtension().appendingPathExtension("previous.log")
+            let input = try FileHandle(forReadingFrom: url)
+            let end = try input.seekToEnd()
+            try input.seek(toOffset: end > retainedBytes ? end - retainedBytes : 0)
+            let tail = try input.readToEnd() ?? Data()
+            try input.close()
+            try tail.write(to: previous, options: .atomic)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: previous.path
+            )
+            try Data().write(to: url, options: .atomic)
+        } else if !fileManager.fileExists(atPath: url.path) {
+            guard fileManager.createFile(atPath: url.path, contents: nil) else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+        }
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
+    }
+
+    private func terminatePreviousInstance(paths: RuntimePaths) throws {
         guard let pid = runningProcessID(paths: paths) else { return }
         _ = kill(pid, SIGTERM)
-        usleep(400_000)
+        for _ in 0..<60 {
+            if kill(pid, 0) != 0, errno == ESRCH {
+                return
+            }
+            usleep(50_000)
+        }
+        throw LaunchError.previousInstanceDidNotExit
     }
 
     func isRunning(paths: RuntimePaths) -> Bool {
@@ -170,6 +203,7 @@ enum LaunchError: LocalizedError {
     case apiAppNotFound
     case officialAppNotFound
     case officialExecutableNotFound
+    case previousInstanceDidNotExit
 
     var errorDescription: String? {
         switch self {
@@ -177,6 +211,8 @@ enum LaunchError: LocalizedError {
             "未找到 Codex API Plus 或官方 Codex 应用，请先安装其中一个。"
         case .officialAppNotFound: "未找到官方 Codex 应用。"
         case .officialExecutableNotFound: "官方 Codex 应用不完整，找不到可执行文件。"
+        case .previousInstanceDidNotExit:
+            "旧的 API Codex 仍在退出。为避免数据目录冲突，请稍后再启动。"
         }
     }
 }

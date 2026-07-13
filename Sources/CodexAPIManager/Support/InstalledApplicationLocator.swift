@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 enum InstalledApplicationLocator {
@@ -128,10 +129,56 @@ enum InstalledApplicationLocator {
               isDirectory.boolValue,
               let bundle = Bundle(url: url),
               let executable = bundle.executableURL,
-              FileManager.default.isExecutableFile(atPath: executable.path) else {
+              FileManager.default.isExecutableFile(atPath: executable.path),
+              supportsExecutableArchitectures(
+                  bundle.executableArchitectures,
+                  hostArchitectures: hostExecutableArchitectures
+              ) else {
             return false
         }
         return acceptedBundleIdentifiers.isEmpty
             || bundle.bundleIdentifier.map(acceptedBundleIdentifiers.contains) == true
     }
+
+    static func supportsExecutableArchitectures(
+        _ executableArchitectures: [NSNumber]?,
+        hostArchitectures: Set<Int>
+    ) -> Bool {
+        guard let executableArchitectures, !executableArchitectures.isEmpty else {
+            return true
+        }
+        return executableArchitectures.contains {
+            hostArchitectures.contains($0.intValue)
+        }
+    }
+
+    private static var hostExecutableArchitectures: Set<Int> {
+#if arch(arm64)
+        return [NSBundleExecutableArchitectureARM64]
+#elseif arch(x86_64)
+        if isRunningUnderRosetta {
+            return [
+                NSBundleExecutableArchitectureARM64,
+                NSBundleExecutableArchitectureX86_64
+            ]
+        }
+        return [NSBundleExecutableArchitectureX86_64]
+#else
+        return []
+#endif
+    }
+
+#if arch(x86_64)
+    private static var isRunningUnderRosetta: Bool {
+        var translated: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        return sysctlbyname(
+            "sysctl.proc_translated",
+            &translated,
+            &size,
+            nil,
+            0
+        ) == 0 && translated == 1
+    }
+#endif
 }

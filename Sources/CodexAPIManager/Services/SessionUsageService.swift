@@ -88,10 +88,7 @@ enum SessionUsageService {
         ) else { return nil }
 
         var latestFile: (url: URL, date: Date)?
-        var inspected = 0
         for case let url as URL in enumerator where url.pathExtension == "jsonl" {
-            inspected += 1
-            if inspected > 5_000 { break }
             guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true,
                   let date = values.contentModificationDate else { continue }

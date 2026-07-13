@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.14.2 - 2026-07-13
+
+- Migrated stale per-user workspace paths automatically while preserving
+  unavailable external-volume paths.
+- Hardened profile/config parsing, upstream URL construction, model catalog
+  generation, session discovery, and bounded private log rotation.
+- Reapplied private permissions to existing runtime directories and state files
+  on every launch instead of relying on first-creation permissions.
+- Skipped damaged or architecture-incompatible Codex applications so Intel and
+  Apple Silicon Macs can fall back to a compatible official installation.
+
 ## 2.14.1 - 2026-07-13
 
 - Fully isolated API Codex from the official ChatGPT account by assigning

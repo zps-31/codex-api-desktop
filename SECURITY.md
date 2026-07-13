@@ -12,6 +12,8 @@ Security fixes are applied to the latest release, currently 2.14.x.
 - Redirects may not forward credentials to a different origin.
 - API keys are not exported to the launched Codex process environment.
 - Profiles that do not require a key do not trigger Keychain value reads.
+- Existing runtime directories and manager-owned state files are re-permissioned
+  for the current user during startup.
 
 ## Defensive limits
 

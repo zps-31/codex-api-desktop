@@ -62,26 +62,51 @@ struct CodexConfigService {
     }
 
     func prepareDirectories() throws {
-        try FileManager.default.createDirectory(
-            at: paths.codexHome,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try FileManager.default.createDirectory(
-            at: paths.desktopDataDirectory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
         for directory in [
+            paths.supportDirectory,
+            paths.codexHome,
             paths.desktopHomeDirectory,
             paths.desktopHomeDirectory.appendingPathComponent(".config", isDirectory: true),
             paths.desktopHomeDirectory.appendingPathComponent(".cache", isDirectory: true),
-            paths.desktopHomeDirectory.appendingPathComponent(".local/share", isDirectory: true)
+            paths.desktopHomeDirectory.appendingPathComponent(".local/share", isDirectory: true),
+            paths.desktopDataDirectory
         ] {
             try FileManager.default.createDirectory(
                 at: directory,
                 withIntermediateDirectories: true,
                 attributes: [.posixPermissions: 0o700]
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: directory.path
+            )
+        }
+
+        let privateFiles = [
+            paths.profilesFile,
+            paths.codexHome.appendingPathComponent("config.toml"),
+            paths.activeProfileFile,
+            paths.activeAuthModeFile,
+            paths.workingDirectoryFile,
+            paths.modelCatalogFile,
+            paths.authFile,
+            paths.desktopPIDFile,
+            paths.desktopLogFile,
+            paths.desktopLogFile.deletingPathExtension()
+                .appendingPathExtension("previous.log")
+        ]
+        for file in privateFiles where FileManager.default.fileExists(
+            atPath: file.path
+        ) {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: file.path
+            )
+        }
+        if FileManager.default.fileExists(atPath: paths.launcherFile.path) {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: paths.launcherFile.path
             )
         }
     }
@@ -100,14 +125,24 @@ struct CodexConfigService {
         )
     }
 
-    private static func configuredModel(at file: URL) -> String? {
+    static func configuredModel(at file: URL) -> String? {
         guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
         for line in text.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("model = \"") else { continue }
-            let value = trimmed.dropFirst("model = \"".count)
-            guard let quote = value.firstIndex(of: "\"") else { return nil }
-            return String(value[..<quote])
+            guard trimmed.hasPrefix("model = \""),
+                  trimmed.hasSuffix("\"") else {
+                continue
+            }
+            let encoded = trimmed
+                .dropFirst("model = \"".count)
+                .dropLast()
+            guard let decoded = try? JSONSerialization.jsonObject(
+                with: Data(("\"" + String(encoded) + "\"").utf8),
+                options: [.fragmentsAllowed]
+            ) as? String else {
+                return nil
+            }
+            return decoded
         }
         return nil
     }
@@ -129,7 +164,7 @@ struct CodexConfigService {
         }
         let lines = [
             "#:schema https://developers.openai.com/codex/config-schema.json",
-            "model = \"\(Self.modelAlias(for: profile, in: profiles))\"",
+            "model = \"\(TOMLEscaping.string(Self.modelAlias(for: profile, in: profiles)))\"",
             "model_provider = \"\(Self.routerProviderID)\"",
             "model_catalog_json = \"\(TOMLEscaping.string(paths.modelCatalogFile.path))\"",
             "plan_mode_reasoning_effort = \"\(profile.workScenario.planReasoningEffort)\"",
@@ -169,6 +204,17 @@ struct CodexConfigService {
             atomically: true,
             encoding: .utf8
         )
+        for file in [
+            paths.codexHome.appendingPathComponent("config.toml"),
+            paths.activeProfileFile,
+            paths.activeAuthModeFile,
+            paths.workingDirectoryFile
+        ] {
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: file.path
+            )
+        }
         // The desktop build is launched directly by the manager. The legacy
         // .command file is left untouched so existing users do not lose it.
     }
@@ -189,15 +235,40 @@ struct CodexConfigService {
             throw ConfigServiceError.codexCLINotFound
         }
 
-        let output = Pipe()
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-models-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil) else {
+            throw ConfigServiceError.modelCatalogUnavailable
+        }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: outputURL.path
+        )
+        let output = try FileHandle(forWritingTo: outputURL)
+        defer { try? output.close() }
         let process = Process()
         process.executableURL = codexBinary
         process.arguments = ["debug", "models", "--bundled"]
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        let deadline = Date().addingTimeInterval(10)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        if process.isRunning {
+            process.terminate()
+            process.waitUntilExit()
+            try output.close()
+            throw ConfigServiceError.modelCatalogTimedOut
+        }
+        try output.close()
+        let size = try outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard size >= 0, size <= 8 * 1_024 * 1_024 else {
+            throw ConfigServiceError.modelCatalogUnavailable
+        }
+        let data = try Data(contentsOf: outputURL, options: .mappedIfSafe)
         guard process.terminationStatus == 0,
               let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let models = root["models"] as? [[String: Any]],
@@ -211,7 +282,7 @@ struct CodexConfigService {
             var model = baseline
             model["slug"] = Self.modelAlias(for: profile, in: profiles)
             model["display_name"] = profile.name
-            model["description"] = "\(profile.model) · \(profile.baseURL)"
+            model["description"] = "\(profile.model) · \(Self.publicBaseURL(profile.baseURL))"
             model["visibility"] = "list"
             model["supported_in_api"] = true
             model["priority"] = 0
@@ -233,6 +304,19 @@ struct CodexConfigService {
             options: [.prettyPrinted, .sortedKeys]
         )
         try catalogData.write(to: paths.modelCatalogFile, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: paths.modelCatalogFile.path
+        )
+    }
+
+    private static func publicBaseURL(_ value: String) -> String {
+        guard var components = URLComponents(string: value) else { return "自定义 API" }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? "自定义 API"
     }
 
     private func writeLauncher() throws {
@@ -278,6 +362,7 @@ struct CodexConfigService {
 enum ConfigServiceError: LocalizedError {
     case codexCLINotFound
     case modelCatalogUnavailable
+    case modelCatalogTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -285,6 +370,8 @@ enum ConfigServiceError: LocalizedError {
             return "找不到 Codex CLI，无法生成桌面版模型目录。"
         case .modelCatalogUnavailable:
             return "无法读取 Codex 内置模型目录，请更新或重新安装 Codex。"
+        case .modelCatalogTimedOut:
+            return "读取 Codex 内置模型目录超时，请重新启动 Codex 后再试。"
         }
     }
 }

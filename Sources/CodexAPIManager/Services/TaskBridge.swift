@@ -82,11 +82,7 @@ struct TaskBridge {
         fileManager: FileManager = .default
     ) throws -> TaskBridgeRecord {
         let directory = try defaultDirectory(fileManager: fileManager)
-        try fileManager.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
+        try prepareDirectory(directory, fileManager: fileManager)
 
         let projectName = URL(fileURLWithPath: workingDirectory, isDirectory: true)
             .lastPathComponent
@@ -222,9 +218,25 @@ struct TaskBridge {
         directory: URL,
         fileManager: FileManager
     ) throws {
+        try prepareDirectory(directory, fileManager: fileManager)
         let file = directory.appendingPathComponent(historyFilename)
         try JSONEncoder.taskBridge.encode(records).write(to: file, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
+
+    private static func prepareDirectory(
+        _ directory: URL,
+        fileManager: FileManager
+    ) throws {
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try fileManager.setAttributes(
+            [.posixPermissions: 0o700],
+            ofItemAtPath: directory.path
+        )
     }
 
     static func billingProvider(for profile: ProviderProfile) -> String? {
