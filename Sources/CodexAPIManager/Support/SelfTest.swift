@@ -23,6 +23,35 @@ enum SelfTest {
             !ProfileStore.isAvailable(remote, hasStoredKey: false),
             "remote profile requires a key"
         )
+        let isolatedHome = URL(
+            fileURLWithPath: "/tmp/codex-api-plus/api-home",
+            isDirectory: true
+        )
+        let accountHome = KeychainService.resolvedUserHome(
+            accountDirectory: "/Users/example",
+            fallback: isolatedHome
+        )
+        try expect(
+            accountHome.path == "/Users/example",
+            "account home overrides isolated process HOME"
+        )
+        try expect(
+            KeychainService.loginKeychainURL(home: accountHome).path
+                == "/Users/example/Library/Keychains/login.keychain-db",
+            "login Keychain path"
+        )
+        try expect(
+            KeychainService.legacyServices.contains(
+                "com.zps.codex-api-manager.api-keys"
+            ),
+            "legacy Keychain service compatibility"
+        )
+        try expect(
+            KeychainService.parseKeychainList(
+                "    \"/Users/example/Library/Keychains/login.keychain-db\"\n"
+            ) == ["/Users/example/Library/Keychains/login.keychain-db"],
+            "Keychain search-list parsing"
+        )
         do {
             try remote.validate(requireStoredKey: true, hasStoredKey: false)
             throw SelfTestError.failed("remote key validation")

@@ -5,8 +5,8 @@ MODE="${1:-run}"
 APP_NAME="CodexAPIManagerPlus"
 DISPLAY_NAME="Codex API 桌面版 Plus"
 BUNDLE_ID="com.zps.codex-api-desktop.plus"
-APP_VERSION="2.14.2"
-BUILD_NUMBER="29"
+APP_VERSION="2.14.3"
+BUILD_NUMBER="30"
 MIN_SYSTEM_VERSION="14.0"
 ARCHS="${ARCHS:-arm64 x86_64}"
 DISTRIBUTION="${DISTRIBUTION:-0}"
@@ -72,6 +72,26 @@ build_release() {
 build_debug() {
   swift build -Xswiftc -warnings-as-errors
   BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
+}
+
+terminate_running_managers() {
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+  done < <(
+    /usr/bin/pgrep -f "/Contents/MacOS/${APP_NAME}$" 2>/dev/null || true
+  )
+
+  local attempt
+  for attempt in {1..40}; do
+    if ! /usr/bin/pgrep -f "/Contents/MacOS/${APP_NAME}$" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "Existing $APP_NAME process did not terminate" >&2
+  return 1
 }
 
 create_bundle() {
@@ -185,7 +205,7 @@ case "$MODE" in
     create_bundle
     case "$MODE" in
       run)
-        pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+        terminate_running_managers
         /usr/bin/open -n "$APP_BUNDLE"
         ;;
       --debug|debug)

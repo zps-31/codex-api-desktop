@@ -14,6 +14,7 @@ let package = Package(
             exclude: ["App", "Views"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
+                .linkedFramework("LocalAuthentication"),
                 .linkedFramework("Network"),
                 .linkedFramework("Security")
             ]

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.14.3 - 2026-07-13
+
+- Recovered Keychain access when the per-user default/search-list preference
+  is missing by opening the real macOS account login Keychain explicitly.
+- Kept Keychain lookup independent from API Codex `HOME` isolation and added
+  legacy service-name fallback with lazy migration.
+- Added a secret-free Keychain write/update/read/delete diagnostic for release
+  checks.
+- Replaced truncated-name process termination with full executable-path
+  matching so local rebuilds cannot leave an older manager instance running.
+
 ## 2.14.2 - 2026-07-13
 
 - Migrated stale per-user workspace paths automatically while preserving

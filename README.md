@@ -2,7 +2,7 @@
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://www.apple.com/macos/)
 [![Universal](https://img.shields.io/badge/arch-arm64%20%2B%20x86__64-0A84FF)](README.md)
-[![Release 2.14.2](https://img.shields.io/badge/release-2.14.2-30D158)](CHANGELOG.md)
+[![Release 2.14.3](https://img.shields.io/badge/release-2.14.3-30D158)](CHANGELOG.md)
 
 一个原生 macOS 配置管理器，用于管理 OpenAI-compatible Responses API
 配置，并启动与官方 Codex 数据隔离的 API 版 Codex 桌面进程。
@@ -13,12 +13,12 @@
 
 ## 当前版本
 
-**2.14.2**, 2026-07-13
+**2.14.3**, 2026-07-13
 
-- 发布包：`Codex-API-Desktop-Plus-2.14.2.zip`
-- 校验文件：`Codex-API-Desktop-Plus-2.14.2.zip.sha256`
-- [直接下载 2.14.2](https://github.com/zps-31/codex-api-desktop/raw/refs/heads/main/downloads/Codex-API-Desktop-Plus-2.14.2.zip)
-- SHA-256：`e007af5fc5b46faa507282f34c00087cf30202f4ffb1c3c212a63c0d25ac329d`
+- 发布包：`Codex-API-Desktop-Plus-2.14.3.zip`
+- 校验文件：`Codex-API-Desktop-Plus-2.14.3.zip.sha256`
+- [直接下载 2.14.3](https://github.com/zps-31/codex-api-desktop/raw/refs/heads/main/downloads/Codex-API-Desktop-Plus-2.14.3.zip)
+- SHA-256：`c4905f7e68e038c6c8e02725abb7dcac2ed045a05c68fad7bce4ae8f763aecdf`
 - 完整变更：[CHANGELOG.md](CHANGELOG.md)
 
 ## 主要功能
@@ -27,6 +27,7 @@
 - 新增、复制、删除和切换模型配置。
 - 支持需要 API Key 的远程服务，以及无需 Key 的 Ollama、LM Studio 等本地服务。
 - API Key 只保存到 macOS 钥匙串。
+- 自动修复缺失的用户默认/搜索钥匙串设置，并兼容旧版密钥服务名。
 - 启动前检查凭据、工作目录、模型目录和目标模型。
 - 使用独立 `HOME`、`CFFIXED_USER_HOME`、XDG、`CODEX_HOME` 与桌面数据
   目录，不修改官方 `~/.codex`，可与 ChatGPT 账户同时运行。
@@ -72,6 +73,7 @@ git clone https://github.com/zps-31/codex-api-desktop.git
 cd codex-api-desktop
 swift build -Xswiftc -warnings-as-errors
 swift run CodexAPIManagerPlus --self-test
+swift run CodexAPIManagerPlus --verify-keychain
 ./script/build_and_run.sh
 ```
 

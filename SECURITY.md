@@ -7,6 +7,11 @@ Security fixes are applied to the latest release, currently 2.14.x.
 ## Credential handling
 
 - API keys are stored in macOS Keychain.
+- Keychain discovery is anchored to the real macOS account home rather than an
+  inherited API-isolated `HOME`; missing login Keychain default/search entries
+  are repaired without exporting credential values.
+- New credentials are added before any existing-item update is attempted, and
+  the legacy Keychain service name remains readable during migration.
 - The local proxy binds only to `127.0.0.1`.
 - Remote API endpoints that use credentials must use HTTPS.
 - Redirects may not forward credentials to a different origin.
@@ -31,9 +36,11 @@ API keys, session logs, account details, or provider credentials in an issue.
 
 Release builds must pass strict Debug and Release compilation, the built-in
 self-test on supported architecture slices, bundle validation, zip integrity,
-and signature verification. `DISTRIBUTION=1` additionally requires Developer ID
-signing, Hardened Runtime, timestamping, Apple notarization, stapling, and
-Gatekeeper acceptance.
+signature verification, and the secret-free `--verify-keychain` write/read/delete
+round trip, including replacement of an existing value. `DISTRIBUTION=1`
+additionally requires Developer ID signing,
+Hardened Runtime, timestamping, Apple notarization, stapling, and Gatekeeper
+acceptance.
 
 The locally generated test artifact is ad-hoc signed because this machine does
 not currently contain a Developer ID certificate.

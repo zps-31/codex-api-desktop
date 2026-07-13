@@ -31,9 +31,15 @@
 - 实际 Codex CLI 经 `127.0.0.1:62139/v1/responses` 完成流式请求并返回 `SECURITY_OK`。
 - 2026-07-13 的官方 Codex 事件仅返回 10080 分钟周窗口，旧 300 分钟
   窗口已不再返回；Meter 的运行态选择与新额度规则一致。
-- 官方 `gpt-5.5` 与 API 私有 `gpt-5.6-sol` 并行真实请求均成功，官方
-  配置哈希在两次请求前后保持不变。
-- 候选版本：Codex API 桌面版 Plus 2.14.2；Codex Meter Plus 2.5.2。
+- API 私有 `gpt-5.6-sol` 并行真实请求成功；官方请求确认仍使用
+  `gpt-5.5 / openai`，当前只因周额度耗尽而停止，未再发生模型冲突。
+  官方配置在隔离检查前后不含 API 路由或私有模型。
+- API Plus 钥匙串在被隔离 `HOME` 污染的环境中完成写入、读取、删除回环；
+  11 个模型对应 11 个密钥条目，未残留 `diagnostic-*` 测试记录。
+- Meter build 19 的 `UsageStatisticsCache.latestUsage` 优化构建崩溃已复现、
+  定位并修复；build 21 跨多个刷新周期无新崩溃报告。
+- 候选版本：Codex API 桌面版 Plus 2.14.3 (30)；Codex Meter Plus
+  2.5.3 (21)。
 
 ## 性能与兼容性复查
 
@@ -41,12 +47,14 @@
 - API Codex 使用独立 `HOME`、Core Foundation home、XDG、`CODEX_HOME`
   和 Electron 数据目录；与官方 ChatGPT Codex 并行运行时不会改写
   `~/.codex/config.toml`。
-- Meter 对官方约 10.58 亿和 API Plus 约 10.87 亿 Token 的真实历史验证
-  通过；35 秒累计 CPU 增加约 0.03 秒，RSS 回落到约 55.8 MiB。
+- Meter 对官方 868,988,165 和 API Plus 964,784,308 Token 的验收时真实历史
+  验证通过，并从 API 统计中排除 463,008,518 个其他来源 Token。
 - API 管理器在真实路由运行的 35 秒窗口内累计 CPU 增加约 0.12 秒，
   RSS 回落到约 27.7 MiB。
 - Meter 改为固定缓冲区流式解析后，能够计入此前被 64 MiB 上限整份忽略的
   89 MiB 有效会话文件。
+- 活动 JSONL 使用 inode 与已解析偏移增量续读；70 秒刷新窗口 CPU 由
+  1.79 秒降至 0.45 秒，稳定物理 footprint 约 28 MiB。
 - 两款应用会自动迁移旧用户路径；不兼容当前 Mac 架构的 Codex 候选会被
   跳过并回退到可执行的官方安装。
 
