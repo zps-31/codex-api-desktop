@@ -492,6 +492,18 @@ enum SelfTest {
             monitor.latest(in: directory)?.totalTokens == 23_456,
             "session monitor refresh"
         )
+
+        let distantEvent = directory.appendingPathComponent("distant.jsonl")
+        var distantData = Data(fixture.utf8)
+        distantData.append(0x0A)
+        distantData.append(Data(repeating: Character("x").asciiValue!, count: 300 * 1_024))
+        distantData.append(0x0A)
+        try distantData.write(to: distantEvent)
+        try expect(
+            SessionUsageService.snapshot(from: distantEvent)?.totalTokens
+                == 12_345,
+            "session usage fallback window"
+        )
     }
 
     private static func verifyApplicationLocation() throws {
@@ -552,6 +564,13 @@ enum SelfTest {
                 acceptedBundleIdentifiers: ["com.example.other"]
             ),
             "application bundle ID validation"
+        )
+        try expect(
+            !InstalledApplicationLocator.isValidApplication(
+                at: app,
+                acceptedBundleIdentifiers: ["com.zps.codex-api-plus"]
+            ),
+            "API runtime rejects official or unrelated application bundles"
         )
     }
 

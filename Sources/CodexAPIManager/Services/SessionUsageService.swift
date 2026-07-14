@@ -102,11 +102,33 @@ enum SessionUsageService {
         defer { try? file.close() }
 
         let end = (try? file.seekToEnd()) ?? 0
-        let limit: UInt64 = 4 * 1_024 * 1_024
-        try? file.seek(toOffset: end > limit ? end - limit : 0)
-        guard let data = try? file.readToEnd(),
-              let text = String(data: data, encoding: .utf8) else { return nil }
+        let maximumWindow: UInt64 = 4 * 1_024 * 1_024
+        var window = min(end, 256 * 1_024)
 
+        while true {
+            let start = end > window ? end - window : 0
+            try? file.seek(toOffset: start)
+            guard var data = try? file.readToEnd() else { return nil }
+            if start > 0 {
+                guard let newline = data.firstIndex(of: 0x0A) else {
+                    if window >= min(end, maximumWindow) { return nil }
+                    window = min(end, maximumWindow, window * 2)
+                    continue
+                }
+                data.removeSubrange(data.startIndex...newline)
+            }
+            if let snapshot = snapshot(in: data) {
+                return snapshot
+            }
+            if start == 0 || window >= maximumWindow {
+                return nil
+            }
+            window = min(end, maximumWindow, window * 2)
+        }
+    }
+
+    private static func snapshot(in data: Data) -> SessionUsageSnapshot? {
+        guard let text = String(data: data, encoding: .utf8) else { return nil }
         for line in text.split(whereSeparator: { $0.isNewline }).reversed() where line.contains("\"token_count\"") {
             guard let root = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let payload = root["payload"] as? [String: Any],

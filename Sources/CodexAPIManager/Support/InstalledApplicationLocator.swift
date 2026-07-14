@@ -16,7 +16,7 @@ enum InstalledApplicationLocator {
         applicationURL(
             bundleIdentifiers: apiCodexBundleIDs,
             names: apiCodexNames
-        ) ?? officialCodexApplicationURL()
+        )
     }
 
     static func officialCodexApplicationURL() -> URL? {

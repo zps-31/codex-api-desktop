@@ -16,7 +16,7 @@ struct CodexDesktopLauncher {
             .appendingPathComponent(executableName)
 
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
-            throw LaunchError.officialExecutableNotFound
+            throw LaunchError.apiExecutableNotFound
         }
 
         try terminatePreviousInstance(paths: paths)
@@ -193,7 +193,7 @@ struct CodexDesktopLauncher {
             forInfoDictionaryKey: "CFBundleExecutable"
         ) as? String,
               !executable.isEmpty else {
-            throw LaunchError.officialExecutableNotFound
+            throw LaunchError.apiExecutableNotFound
         }
         return executable
     }
@@ -202,15 +202,15 @@ struct CodexDesktopLauncher {
 enum LaunchError: LocalizedError {
     case apiAppNotFound
     case officialAppNotFound
-    case officialExecutableNotFound
+    case apiExecutableNotFound
     case previousInstanceDidNotExit
 
     var errorDescription: String? {
         switch self {
         case .apiAppNotFound:
-            "未找到 Codex API Plus 或官方 Codex 应用，请先安装其中一个。"
+            "未找到独立的 Codex API Plus 应用。为保护官方账户配置，API 模式不会使用官方 Codex 作为回退。"
         case .officialAppNotFound: "未找到官方 Codex 应用。"
-        case .officialExecutableNotFound: "官方 Codex 应用不完整，找不到可执行文件。"
+        case .apiExecutableNotFound: "Codex API Plus 应用不完整，找不到可执行文件。"
         case .previousInstanceDidNotExit:
             "旧的 API Codex 仍在退出。为避免数据目录冲突，请稍后再启动。"
         }

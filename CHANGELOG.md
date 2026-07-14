@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.14.4 - 2026-07-13
+
+- Removed the API desktop launch fallback to the official Codex application.
+  API configuration and its private environment can now only be passed to the
+  separately identified `Codex API Plus` runtime.
+- Clarified missing and damaged API-runtime errors so a failed API launch
+  cannot be mistaken for an official Codex issue.
+
 ## 2.14.3 - 2026-07-13
 
 - Recovered Keychain access when the per-user default/search-list preference
@@ -10,6 +18,8 @@
   checks.
 - Replaced truncated-name process termination with full executable-path
   matching so local rebuilds cannot leave an older manager instance running.
+- Reads a 256 KiB session tail first and expands only when necessary, reducing
+  status-bar CPU and transient memory while retaining the 4 MiB fallback.
 
 ## 2.14.2 - 2026-07-13
 
