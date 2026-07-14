@@ -128,12 +128,18 @@ final class APIProxyServer {
             guard let self else { return }
             var buffer = accumulated
             if let data { buffer.append(data) }
-            if let request = HTTPProxyRequest.parse(buffer) {
+            switch HTTPProxyRequest.parseResult(buffer) {
+            case .complete(let request):
                 self.forward(request, on: connection)
-            } else if complete || error != nil || buffer.count > 16_777_216 {
+            case .invalid:
                 self.sendError(400, "无法读取 Codex API 请求", on: connection)
-            } else {
-                self.receiveRequest(from: connection, accumulated: buffer)
+            case .incomplete:
+                if complete || error != nil
+                    || buffer.count > HTTPProxyRequest.maximumRequestSize {
+                    self.sendError(400, "无法读取 Codex API 请求", on: connection)
+                } else {
+                    self.receiveRequest(from: connection, accumulated: buffer)
+                }
             }
         }
     }
@@ -212,7 +218,12 @@ final class APIProxyServer {
 
     private func sendError(_ status: Int, _ message: String, on connection: NWConnection) {
         let payload = (try? JSONSerialization.data(withJSONObject: ["error": ["message": message]])) ?? Data()
-        let reason = status == 401 ? "Unauthorized" : status == 405 ? "Method Not Allowed" : "Bad Request"
+        let reason = switch status {
+        case 401: "Unauthorized"
+        case 404: "Not Found"
+        case 405: "Method Not Allowed"
+        default: "Bad Request"
+        }
         let header = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: \(payload.count)\r\nConnection: close\r\n\r\n"
         var response = Data(header.utf8)
         response.append(payload)
@@ -221,77 +232,150 @@ final class APIProxyServer {
 }
 
 struct HTTPProxyRequest {
+    enum ParseResult {
+        case incomplete
+        case invalid
+        case complete(HTTPProxyRequest)
+    }
+
+    private enum ChunkParseResult {
+        case incomplete
+        case invalid
+        case complete(Data)
+    }
+
+    private static let maximumHeaderSize = 64 * 1_024
     private static let maximumBodySize = 16_777_216
+    static let maximumRequestSize = maximumHeaderSize + maximumBodySize + 4
     let method: String
     let path: String
     let headers: [String: String]
     let body: Data
 
     static func parse(_ data: Data) -> HTTPProxyRequest? {
+        guard case .complete(let request) = parseResult(data) else { return nil }
+        return request
+    }
+
+    static func parseResult(_ data: Data) -> ParseResult {
         let marker = Data("\r\n\r\n".utf8)
-        guard let boundary = data.range(of: marker),
-              let headerText = String(data: data[..<boundary.lowerBound], encoding: .utf8) else { return nil }
+        guard let boundary = data.range(of: marker) else {
+            return data.count > maximumHeaderSize ? .invalid : .incomplete
+        }
+        guard boundary.lowerBound <= maximumHeaderSize,
+              let headerText = String(
+                  data: data[..<boundary.lowerBound],
+                  encoding: .utf8
+              ) else {
+            return .invalid
+        }
         let lines = headerText.components(separatedBy: "\r\n")
         let requestLine = lines.first?.split(separator: " ") ?? []
-        guard requestLine.count >= 2 else { return nil }
+        guard requestLine.count == 3,
+              requestLine[2].hasPrefix("HTTP/") else {
+            return .invalid
+        }
         var headers: [String: String] = [:]
+        var framingHeaders: [String: String] = [:]
         for line in lines.dropFirst() {
-            guard let colon = line.firstIndex(of: ":") else { continue }
+            guard let colon = line.firstIndex(of: ":") else { return .invalid }
             let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
             let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return .invalid }
+            let normalizedName = name.lowercased()
+            if normalizedName == "content-length"
+                || normalizedName == "transfer-encoding" {
+                guard framingHeaders[normalizedName] == nil else { return .invalid }
+                framingHeaders[normalizedName] = value
+            }
             headers[name] = value
         }
         let bodyStart = boundary.upperBound
         let body: Data
-        if headers.contains(where: {
-            $0.key.caseInsensitiveCompare("Transfer-Encoding") == .orderedSame
-                && $0.value.lowercased().contains("chunked")
-        }) {
-            guard let decoded = decodeChunked(data.subdata(in: bodyStart..<data.count)) else { return nil }
-            body = decoded
-        } else {
-            guard let expectedLength = headers.first(where: {
-                $0.key.caseInsensitiveCompare("Content-Length") == .orderedSame
-            }).map({ Int($0.value) }), let expectedLength,
-                  expectedLength >= 0, expectedLength <= maximumBodySize,
-                  bodyStart <= data.count, expectedLength <= data.count - bodyStart else { return nil }
+        let transferEncoding = framingHeaders["transfer-encoding"]
+        let contentLength = framingHeaders["content-length"]
+        guard transferEncoding == nil || contentLength == nil else { return .invalid }
+        if let transferEncoding {
+            let codings = transferEncoding.split(separator: ",").map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            }
+            guard codings == ["chunked"] else { return .invalid }
+            switch decodeChunked(data.subdata(in: bodyStart..<data.count)) {
+            case .complete(let decoded):
+                body = decoded
+            case .incomplete:
+                return .incomplete
+            case .invalid:
+                return .invalid
+            }
+        } else if let contentLength {
+            let bytes = contentLength.utf8
+            guard !bytes.isEmpty,
+                  bytes.allSatisfy({ (48...57).contains($0) }),
+                  let expectedLength = Int(contentLength),
+                  expectedLength <= maximumBodySize,
+                  bodyStart <= data.count else {
+                return .invalid
+            }
+            let available = data.count - bodyStart
+            guard available >= expectedLength else { return .incomplete }
+            guard available == expectedLength else { return .invalid }
             body = data.subdata(in: bodyStart..<(bodyStart + expectedLength))
+        } else {
+            guard bodyStart == data.count else { return .invalid }
+            body = Data()
         }
-        return HTTPProxyRequest(
-            method: String(requestLine[0]),
-            path: String(requestLine[1]),
-            headers: headers,
-            body: body
+        return .complete(
+            HTTPProxyRequest(
+                method: String(requestLine[0]),
+                path: String(requestLine[1]),
+                headers: headers,
+                body: body
+            )
         )
     }
 
-    private static func decodeChunked(_ data: Data) -> Data? {
+    private static func decodeChunked(_ data: Data) -> ChunkParseResult {
         let separator = Data("\r\n".utf8)
         var cursor = data.startIndex
         var decoded = Data()
         while cursor < data.endIndex {
-            guard let lineEnd = data[cursor...].range(of: separator) else { return nil }
+            guard let lineEnd = data[cursor...].range(of: separator) else {
+                return .incomplete
+            }
             guard let sizeLine = String(data: data[cursor..<lineEnd.lowerBound], encoding: .utf8) else {
-                return nil
+                return .invalid
             }
             let sizeText = sizeLine.split(separator: ";", maxSplits: 1).first ?? ""
-            guard let size = Int(sizeText.trimmingCharacters(in: .whitespaces), radix: 16), size >= 0 else {
-                return nil
+            guard let size = Int(
+                sizeText.trimmingCharacters(in: .whitespaces),
+                radix: 16
+            ), size >= 0 else {
+                return .invalid
             }
             cursor = lineEnd.upperBound
             if size == 0 {
-                guard cursor <= data.count, data.count - cursor >= 2 else { return nil }
-                return decoded
+                guard cursor <= data.count, data.count - cursor >= 2 else {
+                    return .incomplete
+                }
+                guard data[cursor..<(cursor + 2)] == separator,
+                      cursor + 2 == data.endIndex else {
+                    return .invalid
+                }
+                return .complete(decoded)
             }
-            guard size <= maximumBodySize - decoded.count,
-                  cursor <= data.count, data.count - cursor >= 2,
-                  size <= data.count - cursor - 2 else { return nil }
+            guard size <= maximumBodySize - decoded.count else { return .invalid }
+            guard cursor <= data.count,
+                  size <= data.count - cursor,
+                  data.count - cursor - size >= 2 else {
+                return .incomplete
+            }
             decoded.append(data[cursor..<(cursor + size)])
             cursor += size
-            guard data[cursor..<(cursor + 2)] == separator else { return nil }
+            guard data[cursor..<(cursor + 2)] == separator else { return .invalid }
             cursor += 2
         }
-        return nil
+        return .incomplete
     }
 }
 

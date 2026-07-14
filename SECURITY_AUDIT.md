@@ -13,6 +13,8 @@
 - 明文凭据：带 API Key 的远程 Base URL 强制使用 HTTPS；HTTP 仅允许 loopback。
 - 混淆代理：本机路由只接受 `POST /v1/responses`，不再把任意路径代理到带凭据的上游。
 - 请求解析崩溃：拒绝负数、溢出或超过 16 MiB 的 `Content-Length`/chunked 请求体。
+- 请求帧歧义：头部上限为 64 KiB；重复或冲突的长度/分块字段立即拒绝，
+  无正文请求不再等待客户端断开。
 - 内存耗尽：代理写队列上限 8 MiB，普通 HTTP 响应上限 4 MiB，错误响应上限约 1 MiB。
 - 本地文件耗尽：会话枚举、JSONL、配置和任务桥接文件均设置数量/大小上限。
 - 旧权限迁移：已有运行目录、配置、模型目录、PID 和日志文件会在启动时
@@ -38,7 +40,7 @@
   11 个模型对应 11 个密钥条目，未残留 `diagnostic-*` 测试记录。
 - Meter build 19 的 `UsageStatisticsCache.latestUsage` 优化构建崩溃已复现、
   定位并修复；build 21 跨多个刷新周期无新崩溃报告。
-- 候选版本：Codex API 桌面版 Plus 2.14.3 (30)；Codex Meter Plus
+- 候选版本：Codex API 桌面版 Plus 2.14.5 (33)；Codex Meter Plus
   2.5.3 (21)。
 
 ## 性能与兼容性复查

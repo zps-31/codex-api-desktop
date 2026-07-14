@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.14.5 - 2026-07-13
+
+- Completed header-only HTTP requests without waiting for the client to close,
+  so unsupported methods and paths fail immediately.
+- Distinguished incomplete request frames from malformed ones, capped headers
+  at 64 KiB, and rejected duplicate or conflicting body-framing headers.
+- Added parser regressions for empty bodies, partial bodies, negative lengths,
+  ambiguous framing, duplicate lengths, and overflowing chunks.
+- Removed the final forced unwrap from latest-session file selection.
+
 ## 2.14.4 - 2026-07-13
 
 - Removed the API desktop launch fallback to the official Codex application.

@@ -107,6 +107,7 @@ enum SelfTest {
         try expect(ProxyHeaderPolicy.forwardsResponse("Content-Type"), "response content type")
         try verifyChunkedRequestParsing()
         try verifyMalformedRequestRejection()
+        try verifyHeaderOnlyRequestResponse()
         try verifyUpstreamURLConstruction()
         try verifyCredentialTransportValidation()
 
@@ -496,7 +497,7 @@ enum SelfTest {
         let distantEvent = directory.appendingPathComponent("distant.jsonl")
         var distantData = Data(fixture.utf8)
         distantData.append(0x0A)
-        distantData.append(Data(repeating: Character("x").asciiValue!, count: 300 * 1_024))
+        distantData.append(Data(repeating: 0x78, count: 300 * 1_024))
         distantData.append(0x0A)
         try distantData.write(to: distantEvent)
         try expect(
@@ -596,10 +597,79 @@ enum SelfTest {
     }
 
     private static func verifyMalformedRequestRejection() throws {
+        let noBody = "GET /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+        guard case .complete(let headerOnlyRequest) = HTTPProxyRequest.parseResult(
+            Data(noBody.utf8)
+        ) else { throw SelfTestError.failed("header-only request completion") }
+        try expect(headerOnlyRequest.body.isEmpty, "header-only empty body")
+
+        let partial = "POST /v1/responses HTTP/1.1\r\nContent-Length: 2\r\n\r\n{"
+        guard case .incomplete = HTTPProxyRequest.parseResult(Data(partial.utf8))
+        else { throw SelfTestError.failed("partial request detection") }
+
         let negativeLength = "POST /v1/responses HTTP/1.1\r\nContent-Length: -1\r\n\r\n"
-        try expect(HTTPProxyRequest.parse(Data(negativeLength.utf8)) == nil, "negative content length")
+        guard case .invalid = HTTPProxyRequest.parseResult(Data(negativeLength.utf8))
+        else { throw SelfTestError.failed("negative content length") }
+
+        let ambiguous = "POST /v1/responses HTTP/1.1\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n"
+        guard case .invalid = HTTPProxyRequest.parseResult(Data(ambiguous.utf8))
+        else { throw SelfTestError.failed("ambiguous request framing") }
+
+        let duplicateLength = "POST /v1/responses HTTP/1.1\r\nContent-Length: 0\r\ncontent-length: 0\r\n\r\n"
+        guard case .invalid = HTTPProxyRequest.parseResult(Data(duplicateLength.utf8))
+        else { throw SelfTestError.failed("duplicate content length") }
+
         let hugeChunk = "POST /v1/responses HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFF\r\n"
-        try expect(HTTPProxyRequest.parse(Data(hugeChunk.utf8)) == nil, "overflowing chunk size")
+        guard case .invalid = HTTPProxyRequest.parseResult(Data(hugeChunk.utf8))
+        else { throw SelfTestError.failed("overflowing chunk size") }
+    }
+
+    private static func verifyHeaderOnlyRequestResponse() throws {
+        var activeServer: APIProxyServer?
+        var activePort: UInt16?
+        for port in UInt16(62_240)...UInt16(62_249) {
+            let server = APIProxyServer()
+            do {
+                try server.ensureReady(port: port, timeout: 0.5)
+                activeServer = server
+                activePort = port
+                break
+            } catch {
+                server.stop()
+            }
+        }
+        guard let activeServer, let activePort else {
+            throw SelfTestError.failed("loopback test listener")
+        }
+        defer { activeServer.stop() }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        configuration.timeoutIntervalForRequest = 2
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+
+        let completed = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var responseStatus: Int?
+        var responseError: Error?
+        guard let url = URL(
+            string: "http://127.0.0.1:\(activePort)/v1/responses"
+        ) else { throw SelfTestError.failed("loopback test URL") }
+        session.dataTask(with: url) { _, response, error in
+            lock.withLock {
+                responseStatus = (response as? HTTPURLResponse)?.statusCode
+                responseError = error
+            }
+            completed.signal()
+        }.resume()
+
+        guard completed.wait(timeout: .now() + 3) == .success else {
+            throw SelfTestError.failed("header-only response timeout")
+        }
+        let result = lock.withLock { (responseStatus, responseError) }
+        try expect(result.1 == nil, "header-only response error")
+        try expect(result.0 == 405, "header-only response status")
     }
 
     private static func verifyUpstreamURLConstruction() throws {

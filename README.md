@@ -2,7 +2,7 @@
 
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-111111?logo=apple)](https://www.apple.com/macos/)
 [![Universal](https://img.shields.io/badge/arch-arm64%20%2B%20x86__64-0A84FF)](README.md)
-[![Release 2.14.4](https://img.shields.io/badge/release-2.14.4-30D158)](CHANGELOG.md)
+[![Release 2.14.5](https://img.shields.io/badge/release-2.14.5-30D158)](CHANGELOG.md)
 
 一个原生 macOS 配置管理器，用于管理 OpenAI-compatible Responses API
 配置，并启动与官方 Codex 数据隔离的 API 版 Codex 桌面进程。
@@ -13,12 +13,12 @@
 
 ## 当前版本
 
-**2.14.4**, 2026-07-13
+**2.14.5**, 2026-07-13
 
-- 发布包：`Codex-API-Desktop-Plus-2.14.4.zip`
-- 校验文件：`Codex-API-Desktop-Plus-2.14.4.zip.sha256`
-- [直接下载 2.14.4](https://github.com/zps-31/codex-api-desktop/raw/refs/heads/main/downloads/Codex-API-Desktop-Plus-2.14.4.zip)
-- SHA-256：`a695e332224897dd7400c45c0c1b40f7a6fdcf577c4956fbfc0deec89aa66fe2`
+- 发布包：`Codex-API-Desktop-Plus-2.14.5.zip`
+- 校验文件：`Codex-API-Desktop-Plus-2.14.5.zip.sha256`
+- [直接下载 2.14.5](https://github.com/zps-31/codex-api-desktop/raw/refs/heads/main/downloads/Codex-API-Desktop-Plus-2.14.5.zip)
+- SHA-256：`0461d1de3c54bb90c8bdece1b7b6216f40480c3659bf16132b24d6246ae832d9`
 - 完整变更：[CHANGELOG.md](CHANGELOG.md)
 
 ## 主要功能

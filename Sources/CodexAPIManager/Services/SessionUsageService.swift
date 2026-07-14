@@ -92,7 +92,9 @@ enum SessionUsageService {
             guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true,
                   let date = values.contentModificationDate else { continue }
-            if latestFile == nil || date > latestFile!.date { latestFile = (url, date) }
+            if latestFile.map({ date > $0.date }) ?? true {
+                latestFile = (url, date)
+            }
         }
         return latestFile?.url
     }
